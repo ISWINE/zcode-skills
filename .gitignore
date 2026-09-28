@@ -1,0 +1,4 @@
+*.log
+*.done
+__pycache__/
+Thumbs.db
