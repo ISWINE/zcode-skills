@@ -20,6 +20,7 @@ description: Windows 系统配置项手册——已在本机验证的 Windows / 
 | 配置项 | 文件 | 状态 |
 |---|---|---|
 | Windows Terminal 关闭命令行错误提示音 | configs/windows-terminal-bell.md | 已验证 2026-09-29 |
+| JetBrains IDE 去除启动欢迎页（含 DataGrip 2026.2.5 事实档案） | configs/jetbrains-welcome-screen.md | 已验证 2026-09-23 |
 
 ## 新增配置项模板
 
