@@ -62,7 +62,7 @@ sudo systemctl enable mysql > /dev/null 2>&1
 
 echo '[5/6] harden accounts (lab: remote root for Navicat, NAT-isolated)'
 sudo mysql -e "DELETE FROM mysql.user WHERE User=''; DROP DATABASE IF EXISTS test; FLUSH PRIVILEGES;"
-sudo mysql -e "CREATE USER IF NOT EXISTS 'root'@'%' IDENTIFIED WITH caching_sha2_password BY '123456'; GRANT ALL PRIVILEGES ON *.* TO 'root'@'%' WITH GRANT OPTION; FLUSH PRIVILEGES;"
+sudo mysql -e "CREATE USER IF NOT EXISTS 'root'@'%' IDENTIFIED WITH caching_sha2_password BY 'lab123456'; GRANT ALL PRIVILEGES ON *.* TO 'root'@'%' WITH GRANT OPTION; FLUSH PRIVILEGES;"
 
 echo '[6/6] receipt'
 sudo mysql -e "SELECT @@version AS version, @@version_comment AS edition;"
