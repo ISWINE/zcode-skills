@@ -46,7 +46,9 @@ try {
     $L.Add(("vm name       : {0} (Gen{1}, state {2})" -f $vmObj.Name, $vmObj.Generation, $vmObj.State))
     $L.Add(("cpu           : {0} vCPU (nested virt exposed)" -f $vmObj.ProcessorCount))
     $mem = Get-VMMemory -VMName $VmName
-    $L.Add(("memory        : dynamic {0}-{1} MB, startup {2} MB (dynamicEnabled={3})" -f [int]($mem.MinimumBytes/1MB), [int]($mem.MaximumBytes/1MB), [int]($mem.StartupBytes/1MB), $mem.DynamicMemoryEnabled))
+    # object properties are Minimum/Startup/Maximum (bytes) - verified against the
+    # module's own Hyper-V.Format.ps1xml; only the Set-VMMemory PARAMETERS carry the Bytes suffix
+    $L.Add(("memory        : dynamic {0}-{1} MB, startup {2} MB (dynamicEnabled={3})" -f [int]($mem.Minimum/1MB), [int]($mem.Maximum/1MB), [int]($mem.Startup/1MB), $mem.DynamicMemoryEnabled))
     $L.Add(("autostart     : {0} (never starts with Windows)" -f $vmObj.AutomaticStartAction))
     $nic = Get-VMNetworkAdapter -VMName $VmName
     $L.Add(("nic           : switch {0}, mac {1}, ip {2}" -f $nic.SwitchName, $nic.MacAddress, ($nic.IPAddresses -join ' ')))

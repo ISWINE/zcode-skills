@@ -2,11 +2,12 @@
 
 按"炸过/绕过"的程度排序，给未来排障用。
 
-## 1. Hyper-V PowerShell 参数名不信记忆
+## 1. Hyper-V PowerShell 参数名不信记忆（对象属性名也不信）
 
 - `Set-VM`：内存参数是 `-MemoryMinimumBytes / -MemoryMaximumBytes / -MemoryStartupBytes`（不是 -MinimumMemory/-MaximumMemory，那是 Set-VMMemory 的 -MinimumBytes 系列的近亲，极易混）。
 - `Set-VMNetworkAdapter`：固定 MAC 是 `-StaticMacAddress`（没有 -MacAddress 参数；`-MacAddressSpoofing` 是另一回事）。
-- 验证命令：`(Get-Command Set-VM).Parameters.Keys`——非管理员 shell 也能列参数表，写脚本前先跑一遍。
+- `Get-VMMemory` 返回**对象**的属性名是 `Minimum / Startup / Maximum`（原始字节，不带 Bytes 后缀）——只有 Set 的**参数**带 Bytes。同名不同缀，炸过一次报告里内存全显 0。
+- 验证命令：`(Get-Command Set-VM).Parameters.Keys` 查参数；对象属性翻模块自带格式定义 `C:\Windows\System32\WindowsPowerShell\v1.0\Modules\Hyper-V\2.0.0.0\Hyper-V.Format.ps1xml`（无需任何权限）。
 
 ## 2. PS 5.1 原生命令 stderr 致命化
 
