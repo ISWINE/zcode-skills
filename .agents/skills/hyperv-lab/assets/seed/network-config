@@ -1,0 +1,13 @@
+version: 2
+ethernets:
+  nic0:
+    match:
+      macaddress: "00:15:5d:10:10:00"
+    set-name: eth0
+    addresses:
+      - 192.168.100.10/24
+    routes:
+      - to: default
+        via: 192.168.100.1
+    nameservers:
+      addresses: [223.5.5.5, 119.29.29.29]

@@ -1,0 +1,40 @@
+#cloud-config
+hostname: lab
+timezone: Asia/Shanghai
+users:
+  - name: lab
+    gecos: lab
+    shell: /bin/bash
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    lock_passwd: false
+    ssh_authorized_keys:
+      - <PUBKEY>
+chpasswd:
+  expire: false
+  users:
+    - name: lab
+      password: <SHA512-HASH>
+      type: hash
+ssh_pwauth: true
+package_update: false
+packages:
+  - curl
+  - vim
+  - net-tools
+  - linux-cloud-tools-common
+  - linux-cloud-tools-generic
+apt:
+  primary:
+    - arches: [default]
+      uri: http://mirrors.aliyun.com/ubuntu
+  security:
+    - arches: [default]
+      uri: http://mirrors.aliyun.com/ubuntu
+write_files:
+  - path: /etc/systemd/timesyncd.conf
+    content: |
+      [Time]
+      NTP=ntp.aliyun.com
+      FallbackNTP=ntp1.aliyun.com ntp2.aliyun.com
+runcmd:
+  - systemctl restart systemd-timesyncd
