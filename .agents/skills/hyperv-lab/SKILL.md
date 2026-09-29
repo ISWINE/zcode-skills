@@ -87,7 +87,8 @@ VM 控制台（极少需要）：`vmconnect . lab`。
 | `lab.ps1` | 日常 | status/start/stop/ssh/push/report/ck/restore |
 | `build-seed.ps1` | 种子 | seed 目录 → cidata.iso（改种子后重跑） |
 | `guest-report.sh` | 客体 | VM 内只读系统报告（scp 到 ~/guest-report.sh） |
-| `mysql-first-deploy.sh` | 验收 | 首次"上线"练习：部署 MySQL 供宿主 Navicat 连通 |
+| `mysql-install.sh` | 验收 | 企业精简版 MySQL 8 部署（InnoDB 专精饮食法+GTID+慢日志，收据=行为证明） |
+| `lab-start.bat` | 日常 | 双击开机（注销重登前需要 UAC，之后 lab.ps1 start 即可） |
 
 assets/seed/：user-data / network-config / meta-data 模板（占位符版）。
 

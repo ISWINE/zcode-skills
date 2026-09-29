@@ -59,3 +59,10 @@
 
 - 安装器路（ISO+autoinstall 种子）保留在方法论里但默认不用：多一次确认交互、装机 5-10 分钟、无复用价值。
 - 金镜像路：零交互、2-5 分钟、可无限重放——与云厂商一致，学习价值更高（练的就是真实上线方式）。
+
+## 10. MySQL 企业精简三坑（2026-09-29 Ubuntu 24.04 / mysql-server 8.0.46）
+
+- **`SHOW ENGINES` 不反映 `disabled_storage_engines`**：被禁引擎照样显示 YES/DEFAULT。验收必须用**行为证明**（`CREATE TABLE ... ENGINE=MyISAM` 应报 ERROR 3161）+ `SELECT @@disabled_storage_engines`。MyISAM/MEMORY/ARCHIVE/BLACKHOLE/FEDERATED 可禁；CSV 必须留（日志表用）；PERFORMANCE_SCHEMA 内置不可禁；MRG_MYISAM 内置无害。
+- **`mysqlx` 是启动选项不是运行时系统变量**（`SELECT @@mysqlx` 报 Unknown variable）；Debian/Ubuntu 的 X Plugin 是**内置插件**（UNINSTALL PLUGIN 报 1619 不能删），`mysqlx = OFF` 写进配置重启即关（33060 消失）。读 error.log 注意区分 apt postinst 时序的旧 "X Plugin ready" 行，别误判。
+- **`!includedir` 按文件名排序读取，后读者胜**：`99-xxx.cnf` 排在发行版 `mysqld.cnf` **前面**（数字<字母），bind-address 会被原配置的 127.0.0.1 反杀。覆盖发行版配置必须用 **`zz-` 前缀**排到最后。
+- 企业免费商用的准确姿势：社区版（GPLv2，自用/服务化免费）+ 配置调优 + GTID/慢日志基线；付费企业版卖的是商业组件（审计/线程池/热备/支持），社区版用配置与 Percona 工具补位。
