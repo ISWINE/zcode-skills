@@ -28,7 +28,12 @@ try {
     $L.Add('```')
     if ($vmObj.State -eq 'Running') {
         # native stderr isolated via cmd /c (PS 5.1 + EAP=Stop pitfall)
-        $guest = cmd /c "ssh -o BatchMode=yes -o ConnectTimeout=8 $GuestUser bash /home/$GuestUser/guest-report.sh 2>nul"
+        $guest = $null
+        foreach ($try in 1..3) {
+            $guest = cmd /c "ssh -o BatchMode=yes -o ConnectTimeout=8 $GuestUser bash /home/$GuestUser/guest-report.sh 2>nul"
+            if ($guest) { break }
+            Start-Sleep -Seconds 5
+        }
         if ($guest) { $guest | ForEach-Object { $L.Add($_) } }
         else { $L.Add('(ssh not reachable - guest section skipped)') }
     } else { $L.Add('(VM was off - guest section skipped; start VM and re-run for live data)') }
@@ -40,7 +45,8 @@ try {
     $L.Add('```')
     $L.Add(("vm name       : {0} (Gen{1}, state {2})" -f $vmObj.Name, $vmObj.Generation, $vmObj.State))
     $L.Add(("cpu           : {0} vCPU (nested virt exposed)" -f $vmObj.ProcessorCount))
-    $L.Add(("memory        : dynamic {0}-{1} MB, startup {2} MB" -f [int]($vmObj.MemoryMinimumBytes/1MB), [int]($vmObj.MemoryMaximumBytes/1MB), [int]($vmObj.MemoryStartupBytes/1MB)))
+    $mem = Get-VMMemory -VMName $VmName
+    $L.Add(("memory        : dynamic {0}-{1} MB, startup {2} MB (dynamicEnabled={3})" -f [int]($mem.MinimumBytes/1MB), [int]($mem.MaximumBytes/1MB), [int]($mem.StartupBytes/1MB), $mem.DynamicMemoryEnabled))
     $L.Add(("autostart     : {0} (never starts with Windows)" -f $vmObj.AutomaticStartAction))
     $nic = Get-VMNetworkAdapter -VMName $VmName
     $L.Add(("nic           : switch {0}, mac {1}, ip {2}" -f $nic.SwitchName, $nic.MacAddress, ($nic.IPAddresses -join ' ')))
