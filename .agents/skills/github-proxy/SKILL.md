@@ -51,18 +51,18 @@ python ...ghproxy.py clone https://github.com/u/r.git --depth 1        # 便捷�
 1. dev-sidecar 全局 `http.proxy=127.0.0.1:31180` 会毁掉镜像内嵌 github.com 的 git 请求 → 已用 per-host 空代理解决，勿删
 2. 部分镜像（如 git.yylx.win）git 协议响应体合法但 `Content-Type: text/plain`，git 严格校验拒绝 → 这类只配 raw/zip，clone 扫描自动识别
 3. zcode-skills 仓库 remote 是硬编码 `https://gh-proxy.com/https://github.com//ISWINE/...`（带双斜杠）——若 push 失败先跑 check
-## git push 静默配方（防弹窗铁律）
+## git 认证现状（2026-09-30 起，GCM 已出局）
 
-本机没存任何 GitHub 凭据，裸 push 会触发 Git Credential Manager 弹登录框——**禁止裸 push**。统一用：
-
-```bash
-GCM_INTERACTIVE=never GIT_TERMINAL_PROMPT=0 git \
-  -c credential.helper= -c "credential.helper=!f() { echo username=ISWINE; echo password=\$(gh auth token); }; f" \
-  push
-```
-
-- remote 已规范化为 canonical `https://github.com/ISWINE/zcode-skills.git`，insteadOf 自动改写到当前镜像
-- token 由本地 gh CLI（keyring，已登录 ISWINE）提供；镜像透传 Authorization 头（2026-09-30 实测 gh-proxy.com 通）
-- 失败先跑 check 换线再重推；仍失败=gh 登录过期，跑 `gh auth login`
+- **GCM（弹登录框的元凶）已从凭据链移除**：系统级 `credential.helper manager` 已 unset，全局唯一 helper =
+  `D:/Users/12696/AppData/Local/Programs/Python/Python315/python.exe D:/tools/ghproxy/cred_helper.py`
+  （`git config --global credential.guiPrompt false` 另加一道保险）
+- cred_helper.py：github.com + 当前应用镜像 + gh-proxy.com/ghfast.top/ghproxy.net 白名单 → 自动喂 gh CLI 的
+  token（keyring，已登录 ISWINE）；其他域名静默放行走终端提问（永不弹 GUI）
+- **因此裸 `git push` 即可静默认证**，无需任何配方；失败先跑 check 换线再推；仍失败=gh 过期，跑 `gh auth login`
+- 应急备用配方（helper 失效时）：
+  `GCM_INTERACTIVE=never GIT_TERMINAL_PROMPT=0 git -c credential.helper= -c "credential.helper=!f() { echo username=ISWINE; echo password=\$(gh auth token); }; f" push`
+- 教训：git credential helper 里 python 必须写**绝对路径**（`python xxx.py` 在 git 的 exec 环境下不执行且无报错）；
+  multivar 空值重置在 git 2.55 无效；GCM 留在链里会让 `git credential fill` 挂起
+- 想找回 GUI 登录框：`git config --global --add credential.helper manager`
 
 4. 手动 curl 验证镜像须带 `--ssl-no-revoke`（dev-sidecar 证书 + schannel 吊销检查）
