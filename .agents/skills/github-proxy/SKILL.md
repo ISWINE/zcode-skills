@@ -51,4 +51,18 @@ python ...ghproxy.py clone https://github.com/u/r.git --depth 1        # 便捷�
 1. dev-sidecar 全局 `http.proxy=127.0.0.1:31180` 会毁掉镜像内嵌 github.com 的 git 请求 → 已用 per-host 空代理解决，勿删
 2. 部分镜像（如 git.yylx.win）git 协议响应体合法但 `Content-Type: text/plain`，git 严格校验拒绝 → 这类只配 raw/zip，clone 扫描自动识别
 3. zcode-skills 仓库 remote 是硬编码 `https://gh-proxy.com/https://github.com//ISWINE/...`（带双斜杠）——若 push 失败先跑 check
+## git push 静默配方（防弹窗铁律）
+
+本机没存任何 GitHub 凭据，裸 push 会触发 Git Credential Manager 弹登录框——**禁止裸 push**。统一用：
+
+```bash
+GCM_INTERACTIVE=never GIT_TERMINAL_PROMPT=0 git \
+  -c credential.helper= -c "credential.helper=!f() { echo username=ISWINE; echo password=\$(gh auth token); }; f" \
+  push
+```
+
+- remote 已规范化为 canonical `https://github.com/ISWINE/zcode-skills.git`，insteadOf 自动改写到当前镜像
+- token 由本地 gh CLI（keyring，已登录 ISWINE）提供；镜像透传 Authorization 头（2026-09-30 实测 gh-proxy.com 通）
+- 失败先跑 check 换线再重推；仍失败=gh 登录过期，跑 `gh auth login`
+
 4. 手动 curl 验证镜像须带 `--ssl-no-revoke`（dev-sidecar 证书 + schannel 吊销检查）
