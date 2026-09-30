@@ -18,6 +18,17 @@ python ~/.agents/skills/nvidia-img/scripts/nvimg.py "a red cat sitting on a wind
 
 脚本全自动：找 key → 调接口 → 存 JPEG → 打印路径。提示词建议英文（flux 对中文提示词理解弱）。
 
+## 提示词英文重构协议（调用方 LLM 必读）
+
+接口只吃**一个英文 prompt 字符串**：任何额外字段（aspect_ratio / size / negative_prompt…）都会 422；不支持负向提示词。
+用户给中文或口语化描述时，调用脚本前先把提示词重构为英文：
+
+1. **意图零丢失**：主体、动作、环境、风格、氛围全保留，不擅自加戏
+2. 写成一句连贯英文描述（flux-dev 对自然语言友好），约 30–60 词、逗号分节，顺序：主体+动作 → 环境/背景 → 光线/色调 → 艺术风格/媒介 → 画质收尾
+3. 风格词给具体媒介与流派（watercolor / oil painting / cinematic photo / 3D render），**不要堆 "8k, masterpiece, best quality" 这类 SD 老咒语**，flux 不吃
+4. 重构完把英文直接写进脚本 prompt 参数执行；回复用户时附上最终英文提示词，方便他复用微调
+5. 想再精细可先过 `prompt-optimizer` 技能精准档再落英文（可选，不强制）
+
 ## 接口要点（2026-10-01 实测）
 
 | 项 | 值 |
