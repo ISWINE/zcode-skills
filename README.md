@@ -11,6 +11,7 @@
 | `windows-config` | Windows 系统配置项手册：每项含需求/原理/改法/验证/回滚，只收本机已验证的修改 | 说"关提示音/改 Windows 设置"自动触发，或说"把这个加进 windows 配置"收录新项 |
 | `shadio-video` | 小说→动画/听书全管线：系统辨识→角色卡配音→分镜渲染→克隆听书（水墨/沙雕/克隆三种风格） | 说"制作动画/配音/沙雕动画/小说转视频/听书/声音克隆"自动触发 |
 | `github-proxy` | GitHub 国内随机屏蔽自愈：镜像代理池（种子+scriptcat+聚合API 三层采集）→ 双探针测速 → 基线中位数 → 劣化自动换线；apply 后 git clone/raw/codeload 全透明走镜像 | GitHub 打不开/clone 慢/raw 超时/push 失败时自动触发，或说"换镜像/加速 github" |
+| `nvidia-img` | 英伟达（NVIDIA build.nvidia.com）免费生图：flux.1-dev 直调（约 12s/张 JPEG），key 自动从 ZCode 配置读不入库；即梦生图的免费替补 | 说"英伟达生图/NVIDIA 生图/flux 生图/用英伟达画一张/nvimg"自动触发 |
 
 ## 本机部署方式（junction 联接）
 
