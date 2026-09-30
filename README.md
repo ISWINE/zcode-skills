@@ -9,6 +9,7 @@
 | `syscheck` | Windows 系统深度体检与清理（地面真相→孤岛反推理→缓存分类→系统底层→规则层审计），含联接农场防误杀红线 | 说"清理C盘/系统体检/扫孤岛"自动触发，或 `/syscheck` |
 | `hyperv-lab` | Windows Pro 上零第三方依赖部署可抛弃式 Linux 实验服务器：Hyper-V + Ubuntu 官方云金镜像 + cloud-init 静默部署 + 底片快照回滚 + 系统报告（企业部署范式的个人机复刻） | 说"装 Linux 环境/要台测试服务器/静默装机/金镜像/重装练习"自动触发 |
 | `windows-config` | Windows 系统配置项手册：每项含需求/原理/改法/验证/回滚，只收本机已验证的修改 | 说"关提示音/改 Windows 设置"自动触发，或说"把这个加进 windows 配置"收录新项 |
+| `shadio-video` | 小说→动画/听书全管线：系统辨识→角色卡配音→分镜渲染→克隆听书（水墨/沙雕/克隆三种风格） | 说"制作动画/配音/沙雕动画/小说转视频/听书/声音克隆"自动触发 |
 | `github-proxy` | GitHub 国内随机屏蔽自愈：镜像代理池（种子+scriptcat+聚合API 三层采集）→ 双探针测速 → 基线中位数 → 劣化自动换线；apply 后 git clone/raw/codeload 全透明走镜像 | GitHub 打不开/clone 慢/raw 超时/push 失败时自动触发，或说"换镜像/加速 github" |
 
 ## 本机部署方式（junction 联接）
