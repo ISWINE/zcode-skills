@@ -11,7 +11,9 @@ from pathlib import Path
 os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
 os.environ["https_proxy"] = "http://127.0.0.1:31181"
 os.environ["http_proxy"] = "http://127.0.0.1:31181"
-os.environ["PATH"] = r"C:\Users\12696\Documents\z-code\text\sdbgj\tools\bin" + os.pathsep + os.environ["PATH"]
+_ff = Path(r"C:\Users\12696\Documents\z-code\text\xiyouji\sdbgj\tools\bin")
+if _ff.is_dir():
+    os.environ["PATH"] = str(_ff) + os.pathsep + os.environ["PATH"]
 
 import requests
 import urllib3
