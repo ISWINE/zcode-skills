@@ -384,10 +384,13 @@ def clone_check(url, mode):
         return None
     t0 = time.time()
     try:
-        # -c http.proxy= : 镜像必须直连，不走 dev-sidecar；部分镜像 Content-Type 不合规会被 git 拒绝，此处一并探出
+        # -c http.proxy= 镜像直连不走 dev-sidecar；credential.helper= 清空凭据链：
+        # 探针是公开仓库，镜像偶发 401 也不许触发任何认证弹窗/终端提问
+        env = {**os.environ, "GCM_INTERACTIVE": "never", "GIT_TERMINAL_PROMPT": "0"}
         r = subprocess.run(["git", "-c", "http.proxy=", "-c", "http.sslVerify=false",
+                            "-c", "credential.helper=",
                             "ls-remote", "--exit-code", target, "HEAD"],
-                           capture_output=True, timeout=25)
+                           capture_output=True, timeout=25, env=env)
         return int((time.time() - t0) * 1000) if r.returncode == 0 else None
     except Exception:
         return None
