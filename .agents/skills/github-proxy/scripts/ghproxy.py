@@ -19,15 +19,22 @@ v2 优化（DSA 向）：
   python ghproxy.py off                # 撤销 insteadOf，恢复直连
   python ghproxy.py url <github-url>   # 把任意 github/raw/codeload/release URL 改写成当前最优线路
   python ghproxy.py clone <url> [...]  # 便捷克隆（自动改写 + 透传其余参数给 git）
+  python ghproxy.py download <url> [-o 输出路径]
+                                      # 多级自愈下载：候选按延迟从低到高，失效/速率不达标逐个切换；
+                                      # 连续 5 个失效或 5 个不达标触发自愈(collect+test 重排序)；
+                                      # >10MB 多路并行竞速，留最快淘汰其余，胜者中断带进度转顺序续传
 """
 import concurrent.futures as cf
 import json
 import os
 import random
 import re
+import shutil
+import socket
 import statistics
 import subprocess
 import sys
+import threading
 import time
 import urllib.request
 import urllib.error
@@ -40,7 +47,7 @@ UA = "ghproxy/2.0"
 
 # ---------------------------------------------------------------- 探针目标
 RAW_SMALL = "https://raw.githubusercontent.com/octocat/Hello-World/master/README"          # ~200B 延迟探针
-BIG_ZIP = "https://github.com/BurntSushi/ripgrep/archive/refs/tags/13.0.0.zip"            # ~2.2mb 吞吐探针
+BIG_ZIP = "https://github.com/BurntSushi/ripgrep/archive/refs/tags/13.0.0.zip"            # ~0.6MB 吞吐探针(codeload 无 Content-Length)
 RAW_BIG = "https://raw.githubusercontent.com/torvalds/linux/master/MAINTAINERS"            # ~150KB raw 备用吞吐
 CLONE_REPO = "https://github.com/octocat/Hello-World.git"                                 # clone 探针
 SMALL_TIMEOUT = 10
@@ -51,6 +58,18 @@ DEGRADE_LATENCY_X = 3.0       # 延迟 > 基线 3 倍 判劣化
 HISTORY_CAP = 10
 BACKOFF_AFTER = 3             # 连挂 N 次后进入指数退避复测
 PRUNE_FAILS = 8               # 非种子连挂 N 次出池
+
+# download 子命令
+RACE_BIG_BYTES = 10 * 1024 * 1024   # 超过 10MB -> 多路并行竞速
+RACE_PARALLEL = 5                   # 竞速并行流数
+RACE_JUDGE_SEC = 8                  # 竞速裁决窗口（秒）：窗口内比窗口速率，留最快
+RACE_READ_TIMEOUT = 20              # 单流 read 阻塞上限（秒）
+RACE_IO_TIMEOUT = 6                 # 竞速流 socket 超时：短超时+重试，保证 cancel 秒级生效
+SPEED_FLOOR_MBPS = 3.0              # 顺序模式绝对达标线（MB/s）
+SPEED_FLOOR_RATIO = 0.3             # 相对达标线 = 池基线吞吐中位数 * 此比率，取两者较大
+PROBE_WINDOW_BYTES = 1024 * 1024    # 顺序模式：本流下载满 1MB 时判速（更小文件能下即成功）
+HEAL_FAILS = 5                      # 连续 N 个节点失效 / 不达标 -> 自愈
+HEAL_MAX = 3                        # 单次下载自愈次数上限
 
 # ---------------------------------------------------------------- 内置种子池
 # mode: prefix=前置改写(全能力) hostmap=克隆换域 rawhost=raw换域 jsdelivr=CDN仅raw
@@ -537,6 +556,302 @@ def check(st, report_only=False):
     return need_collect
 
 
+# ---------------------------------------------------------------- download：多级自愈下载
+def speed_floor(st):
+    """顺序模式达标线 MB/s = max(绝对下限, 池基线吞吐中位数 * 比率)"""
+    mb = [e["baseline"]["mbps"] for e in st["proxies"].values()
+          if (e.get("baseline") or {}).get("mbps")]
+    rel = round(statistics.median(mb) * SPEED_FLOOR_RATIO, 1) if mb else 0
+    return max(SPEED_FLOOR_MBPS, rel)
+
+
+def download_candidates(st):
+    """下载候选：prefix 模式活跃节点（release/raw 文件只有 prefix 能改写），
+    延迟从低到高排序（同延迟吞吐高者优先）"""
+    rows = [(k, e) for k, e in st["proxies"].items()
+            if e.get("mode") == "prefix" and (e.get("latency_ms") or e.get("mbps"))]
+    rows.sort(key=lambda ke: (ke[1].get("latency_ms") or 99999, -(ke[1].get("mbps") or 0)))
+    return rows
+
+
+def _open(url, timeout=30, headers=None, method="GET"):
+    """urlopen + SSL 劣质镜像降级重试一次；HTTP 错误码原样抛，连接类错误返回 None"""
+    h = {"User-Agent": UA, "Connection": "close"}
+    if headers:
+        h.update(headers)
+    req = urllib.request.Request(url, headers=h, method=method)
+    for ctx in (CTX, CTX_INSECURE):
+        try:
+            return urllib.request.urlopen(req, timeout=timeout, context=ctx)
+        except urllib.error.HTTPError:
+            raise
+        except Exception:
+            continue
+    return None
+
+
+def probe_size(cands, target):
+    """探目标文件大小：HEAD 优先，失败退 GET 只读响应头；前 3 个候选内尝试，拿不到返回 None"""
+    for k, e in cands[:3]:
+        url = rewrite(e["url"], e["mode"], target)
+        if not url:
+            continue
+        for kwargs in ({"method": "HEAD"}, {}):
+            try:
+                with _open(url, timeout=10, **kwargs) as r:
+                    if r.status == 200:
+                        cl = r.headers.get("Content-Length")
+                        if cl and cl.isdigit():
+                            return int(cl)
+            except Exception:
+                continue
+    return None
+
+
+def stream_to_file(url, path, floor_mbps, resume=0, expect=None):
+    """顺序模式单节点流式下载（resume>0 时 Range 续传）。
+    本流满 PROBE_WINDOW_BYTES 判速：低于达标线返回 slow（保留已写进度供下一节点续传）。
+    expect=已知 Content-Length 时完成必须字节吻合，防镜像提前断流静默截断。
+    返回 (state, mbps, total_bytes, err)，state: done / fail / slow"""
+    n, ttfb = 0, None
+    headers = {"Range": f"bytes={resume}-"} if resume else None
+    try:
+        r = _open(url, timeout=RACE_READ_TIMEOUT, headers=headers)
+    except urllib.error.HTTPError as e:
+        return "fail", None, resume, f"HTTP {e.code}"
+    if r is None:
+        return "fail", None, resume, "连接失败"
+    try:
+        if r.status not in (200, 206):
+            return "fail", None, resume, f"HTTP {r.status}"
+        append = resume and r.status == 206
+        if resume and r.status == 200:      # 镜像不支持 Range：从头下
+            resume = 0
+        with r, open(path, "ab" if append else "wb") as f:
+            while True:
+                chunk = r.read(256 * 1024)
+                if not chunk:
+                    break
+                f.write(chunk)
+                n += len(chunk)
+                if ttfb is None:
+                    ttfb = time.time()
+                if n >= PROBE_WINDOW_BYTES:
+                    mbps = round(n * 8 / (time.time() - ttfb) / 1e6, 2)
+                    if mbps < floor_mbps:
+                        return "slow", mbps, resume + n, f"速率 {mbps} < 达标线 {floor_mbps} MB/s"
+        if n == 0 and not resume:
+            return "fail", None, resume, "空响应"
+        total = resume + n
+        if expect is not None and total != expect:
+            return "fail", None, total, f"大小不符 {total} != {expect}"
+        mbps = round(n * 8 / max(time.time() - ttfb, 1e-3) / 1e6, 2) if ttfb else 0
+        return "done", mbps, total, ""
+    except Exception as e:
+        return "fail", None, resume + n, str(e)[:80]
+
+
+class Racer(threading.Thread):
+    """竞速流：整文件下载到独占 part 文件，可被 cancel 淘汰"""
+    def __init__(self, node, url, path, expect=None):
+        super().__init__(daemon=True)
+        self.node, self.url, self.path = node, url, path
+        self.expect = expect
+        self.cancel = threading.Event()
+        self.done = 0
+        self.ttfb = None
+        self.state = "running"              # running / done / dead
+        self.err = ""
+
+    def run(self):
+        try:
+            r = _open(self.url, timeout=RACE_IO_TIMEOUT)
+            if r is None:
+                self.state, self.err = "dead", "连接失败"
+                return
+            with r, open(self.path, "wb") as f:
+                if r.status != 200:
+                    self.state, self.err = "dead", f"HTTP {r.status}"
+                    return
+                while True:
+                    try:
+                        chunk = r.read(256 * 1024)
+                    except socket.timeout:        # 短超时轮询：cancel 后即时退出
+                        if self.cancel.is_set():
+                            self.state, self.err = "dead", "被淘汰"
+                            return
+                        continue
+                    if not chunk:
+                        if self.expect is not None and self.done != self.expect:
+                            self.state, self.err = "dead", f"大小不符 {self.done} != {self.expect}"
+                        else:
+                            self.state = "done"
+                        return
+                    f.write(chunk)
+                    self.done += len(chunk)
+                    if self.ttfb is None:
+                        self.ttfb = time.time()
+                    if self.cancel.is_set():
+                        self.state, self.err = "dead", "被淘汰"
+                        return
+        except Exception as e:
+            self.state, self.err = "dead", str(e)[:80]
+
+
+def _cleanup_race(part_dir):
+    shutil.rmtree(part_dir, ignore_errors=True)
+
+
+def race_download(st, cands, target, out, expect=None):
+    """>10MB 多路竞速：RACE_JUDGE_SEC 秒后按窗口速率留最快、淘汰其余；胜者中断则带回
+    最大磁盘进度转顺序续传。返回 (ok, offset)"""
+    n = min(RACE_PARALLEL, len(cands))
+    part_dir = out + ".race"
+    os.makedirs(part_dir, exist_ok=True)
+    racers = [Racer(k, rewrite(e["url"], e["mode"], target), os.path.join(part_dir, f"{i}.part"), expect)
+              for i, (k, e) in enumerate(cands[:n])]
+    print(f"竞速模式：{n} 路并行 [{' '.join(r.node for r in racers)}]，{RACE_JUDGE_SEC}s 后留最快淘汰其余")
+    for r in racers:
+        r.start()
+
+    samples = {r.node: [] for r in racers}      # (t, done_bytes, state) 采样
+    winner, t_end = None, time.time() + RACE_JUDGE_SEC
+    while time.time() < t_end:
+        time.sleep(0.5)
+        t = time.time()
+        for r in racers:
+            samples[r.node].append((t, r.done, r.state))
+        if any(r.state == "done" for r in racers):
+            winner = max((r for r in racers if r.state == "done"), key=lambda r: r.done)
+            break
+        if all(r.state != "running" for r in racers):
+            break
+
+    def window_rate(r):
+        s = [x for x in samples[r.node] if x[2] == "running"]
+        if len(s) >= 2 and s[-1][0] > s[0][0]:
+            return (s[-1][1] - s[0][1]) * 8 / (s[-1][0] - s[0][0]) / 1e6
+        return -1
+
+    if winner is None:
+        alive = [r for r in racers if r.state == "running"]
+        if alive:
+            alive.sort(key=window_rate, reverse=True)
+            winner = alive.pop(0)
+            print("竞速裁决：" + "  ".join(
+                f"{r.node} {max(window_rate(r), 0):.1f}MB/s" for r in [winner] + alive)
+                + f" -> {winner.node} 胜出")
+    # 出窗收尾：胜者以外仍在跑的流一律淘汰（含胜者提前完成的情况）
+    for r in racers:
+        if r is not winner and r.state == "running":
+            r.cancel.set()
+    if winner is None:
+        print("竞速窗口内全部节点失联")
+
+    # 等全部流退出：cancel 后 read 最长 RACE_IO_TIMEOUT 内让路
+    for r in racers:
+        r.join(timeout=RACE_IO_TIMEOUT + 2)
+
+    best, best_off = None, 0
+    for r in racers:
+        if os.path.exists(r.path):
+            sz = os.path.getsize(r.path)
+            if sz > best_off:
+                best, best_off = r.path, sz
+
+    if winner is not None and winner.state == "done":
+        os.replace(winner.path, out)
+        _cleanup_race(part_dir)
+        el = time.time() - winner.ttfb if winner.ttfb else 1
+        print(f"下载完成 {out}（{winner.done / 1048576:.1f} MB via {winner.node}，"
+              f"均速 {winner.done * 8 / el / 1e6:.1f} MB/s）")
+        return True, 0
+    if winner is not None:
+        print(f"胜者 {winner.node} 中断（{winner.err}）")
+    if best:
+        shutil.copy(best, out + ".part")        # 顺序模式以最大进度续传
+        print(f"保留进度 {best_off / 1048576:.1f} MB 转入顺序模式")
+    _cleanup_race(part_dir)
+    return False, best_off
+
+
+def heal(st, reason):
+    print(f"触发自愈（{reason}）：重新采集 -> 全量测速（约 1-2 分钟）...")
+    collect(st, verbose=False)
+    test(st, quiet=True)
+
+
+def sequential_download(st, target, out, expect=None):
+    """顺序模式：候选按延迟低->高逐节点尝试。失效 -> 下一个；正常但速率不达标 -> 下一个；
+    连续 HEAL_FAILS 个失效 / 不达标触发自愈（collect+test 后重排序从头再试）"""
+    floor = speed_floor(st)
+    print(f"顺序模式：达标线 {floor} MB/s（本流满 {PROBE_WINDOW_BYTES // 1048576}MB 判速）")
+    path = out + ".part"
+    fails = slows = heals = 0
+    while True:
+        cands = download_candidates(st)
+        if not cands:
+            if heals >= HEAL_MAX:
+                print("无可用节点且自愈额度耗尽")
+                return 1
+            heal(st, "候选为空")
+            heals += 1
+            continue
+        broke = False
+        for i, (k, e) in enumerate(cands, 1):
+            url = rewrite(e["url"], e["mode"], target)
+            if not url:
+                continue
+            resume = os.path.getsize(path) if os.path.exists(path) else 0
+            tag = f"[{i}/{len(cands)}] {k}" + (f"（续传 @{resume / 1048576:.1f}MB）" if resume else "")
+            state, mbps, total, err = stream_to_file(url, path, floor, resume, expect)
+            if state == "done":
+                os.replace(path, out)
+                print(f"{tag} 完成：{out} {total / 1048576:.1f} MB，均速 {mbps} MB/s")
+                return 0
+            if state == "slow":
+                slows, fails = slows + 1, 0
+                print(f"{tag} 速率不达标（{err}）-> 切下一个（连续不达标 {slows}/{HEAL_FAILS}）")
+                if slows >= HEAL_FAILS:
+                    broke = True
+                    break
+            else:
+                fails, slows = fails + 1, 0
+                print(f"{tag} 失效（{err}）-> 下一个（连续失效 {fails}/{HEAL_FAILS}）")
+                if fails >= HEAL_FAILS:
+                    broke = True
+                    break
+        if not broke:
+            print(f"全部 {len(cands)} 个候选尝试未成功")
+        if heals >= HEAL_MAX:
+            print(f"自愈额度（{HEAL_MAX} 次）耗尽，放弃")
+            return 1
+        heal(st, "连续 %d 个失效/不达标" % HEAL_FAILS if broke else "全池尝试未成功")
+        heals += 1
+
+
+def cmd_download(st, target, out=None):
+    if not re.match(r"^https://(github\.com|raw\.githubusercontent\.com|codeload\.github\.com)/", target):
+        print("仅支持 github.com / raw.githubusercontent.com / codeload 的 URL")
+        return 1
+    out = os.path.abspath(out or os.path.basename(target.split("?")[0]) or "ghproxy-download.bin")
+    print(f"== 下载 {target}\n   -> {out}")
+    cands = download_candidates(st)
+    if not cands:
+        heal(st, "池为空")
+        cands = download_candidates(st)
+        if not cands:
+            print("无可用节点")
+            return 1
+    size = probe_size(cands, target)
+    print(f"文件大小：{size / 1048576:.1f} MB（>10MB 走竞速）" if size else "文件大小：未知（直接顺序模式）")
+    if size and size > RACE_BIG_BYTES:
+        ok, _off = race_download(st, cands, target, out, size)
+        if ok:
+            return 0
+    return sequential_download(st, target, out, size)
+
+
 # ---------------------------------------------------------------- CLI
 def cmd_url(st, target):
     if st.get("applied"):
@@ -577,6 +892,16 @@ def main():
             print("用法: ghproxy.py url <github-url>")
         else:
             cmd_url(st, sys.argv[2])
+    elif cmd == "download":
+        args = [a for a in sys.argv[2:] if a != "-o"]
+        out = None
+        if "-o" in sys.argv[2:]:
+            i = sys.argv.index("-o")
+            out = sys.argv[i + 1] if i + 1 < len(sys.argv) else None
+        if not args or args[0].startswith("-") or not out:
+            print("用法: ghproxy.py download <github-url> -o <输出路径>")
+        else:
+            sys.exit(cmd_download(st, args[0], out))
     elif cmd == "clone":
         if len(sys.argv) < 3:
             print("用法: ghproxy.py clone https://github.com/u/r.git [dir] [git args...]")

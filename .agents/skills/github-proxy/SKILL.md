@@ -28,14 +28,28 @@ python ...ghproxy.py url https://raw.githubusercontent.com/u/r/main/f   # 输出
 python ...ghproxy.py clone https://github.com/u/r.git --depth 1        # 便捷克隆
 ```
 
+**release/大文件下载直接用 download 子命令**（多级自愈，不要手写 curl）：
+```bash
+python ...ghproxy.py download https://github.com/u/r/releases/download/v1/x.exe -o D:\downloads\x.exe
+```
+
 ## 子命令速查
 
 | 命令 | 作用 |
 |---|---|
 | `check` | 体检+自愈（日常只跑这个） |
+| `download <url> -o <路径>` | 多级自愈下载（详见下方下载策略） |
 | `collect` / `test` / `rank` | 采集新节点 / 全池测速 / 排名表 |
 | `apply [URL]` / `off` | 应用最优或指定节点 / 全部撤销恢复原状 |
 | `url <gh-url>` / `clone <url>` | 改写任意 GitHub URL / 便捷克隆 |
+
+## download 下载策略（2026-10-01 按用户规则实装）
+
+- 候选节点 = prefix 模式活跃节点，**延迟从低到高**排序，每次下载从头开始
+- 逐节点尝试：**失效 → 下一个；能下但速率不达标（<max(3MB/s, 池基线中位数×0.3)，本流满 1MB 判速）→ 也切下一个**，已下进度保留（Range 续传）
+- **连续 5 个失效 / 连续 5 个不达标 → 自愈一次**（collect+test 后重排序从头再试），单次下载最多自愈 3 次
+- **>10MB 文件 → 5 路并行竞速**：同时从延迟最低的 5 个节点开流，8s 窗口后按窗口速率留最快、淘汰其余；胜者中途断线则取磁盘上最大进度转顺序模式续传
+- 已知 Content-Length 时完成必须字节吻合（防镜像断流静默截断）；实测 55MB exe 走竞速 ~12-19s（旧手写 curl 常挂/龟速）
 
 ## 方法论（为什么这样设计）
 
