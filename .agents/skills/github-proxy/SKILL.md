@@ -70,8 +70,7 @@ python ...ghproxy.py download https://github.com/u/r/releases/download/v1/x.exe 
 - **GCM（弹登录框的元凶）已从凭据链移除**：系统级 `credential.helper manager` 已 unset，全局唯一 helper =
   `D:/Users/12696/AppData/Local/Programs/Python/Python315/python.exe D:/tools/ghproxy/cred_helper.py`
   （`git config --global credential.guiPrompt false` 另加一道保险）
-- cred_helper.py：github.com + 当前应用镜像 + gh-proxy.com/ghfast.top/ghproxy.net 白名单 → 自动喂 gh CLI 的
-  token（keyring，已登录 ISWINE）；其他域名静默放行走终端提问（永不弹 GUI）
+- cred_helper.py：**仅 github.com 单白名单**喂 gh CLI 的 token（10-01 ocr 审查后收窄：公网采集池选出的镜像/第三方代理具备中间人能力，一律不附带凭据，匿名失败即失败）；其他域名静默放行走终端提问（永不弹 GUI）
 - **因此裸 `git push` 即可静默认证**，无需任何配方；失败先跑 check 换线再推；仍失败=gh 过期，跑 `gh auth login`
 - 应急备用配方（helper 失效时）：
   `GCM_INTERACTIVE=never GIT_TERMINAL_PROMPT=0 git -c credential.helper= -c "credential.helper=!f() { echo username=ISWINE; echo password=\$(gh auth token); }; f" push`
