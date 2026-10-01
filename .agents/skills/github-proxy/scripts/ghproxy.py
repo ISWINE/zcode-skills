@@ -575,19 +575,27 @@ def download_candidates(st):
 
 
 def _open(url, timeout=30, headers=None, method="GET"):
-    """urlopen + SSL 劣质镜像降级重试一次；HTTP 错误码原样抛，连接类错误返回 None"""
+    """urlopen；HTTP 错误码原样抛，连接类错误返回 None。
+    仅证书校验失败才降级无校验连接（并打印提示）——download 落盘的是用户要执行的
+    文件，其余错误（DNS/超时）静默换无校验重试会扩大中间人投毒面"""
     h = {"User-Agent": UA, "Connection": "close"}
     if headers:
         h.update(headers)
     req = urllib.request.Request(url, headers=h, method=method)
-    for ctx in (CTX, CTX_INSECURE):
+    try:
+        return urllib.request.urlopen(req, timeout=timeout, context=CTX)
+    except urllib.error.HTTPError:
+        raise
+    except ssl.SSLCertVerificationError:
+        print(f"  [SSL 降级] {url}：证书校验失败，改用无校验连接")
         try:
-            return urllib.request.urlopen(req, timeout=timeout, context=ctx)
+            return urllib.request.urlopen(req, timeout=timeout, context=CTX_INSECURE)
         except urllib.error.HTTPError:
             raise
         except Exception:
-            continue
-    return None
+            return None
+    except Exception:
+        return None
 
 
 def probe_size(cands, target):
@@ -637,16 +645,16 @@ def stream_to_file(url, path, floor_mbps, resume=0, expect=None):
                 if ttfb is None:
                     ttfb = time.time()
                 if n >= PROBE_WINDOW_BYTES:
-                    mbps = round(n * 8 / (time.time() - ttfb) / 1e6, 2)
-                    if mbps < floor_mbps:
-                        return "slow", mbps, resume + n, f"速率 {mbps} < 达标线 {floor_mbps} MB/s"
+                    mbs = round(n / (time.time() - ttfb) / 1e6, 2)
+                    if mbs < floor_mbps:
+                        return "slow", mbs, resume + n, f"速率 {mbs} < 达标线 {floor_mbps} MB/s"
         if n == 0 and not resume:
             return "fail", None, resume, "空响应"
         total = resume + n
         if expect is not None and total != expect:
             return "fail", None, total, f"大小不符 {total} != {expect}"
-        mbps = round(n * 8 / max(time.time() - ttfb, 1e-3) / 1e6, 2) if ttfb else 0
-        return "done", mbps, total, ""
+        mbs = round(n / max(time.time() - ttfb, 1e-3) / 1e6, 2) if ttfb else 0
+        return "done", mbs, total, ""
     except Exception as e:
         return "fail", None, resume + n, str(e)[:80]
 
@@ -730,7 +738,7 @@ def race_download(st, cands, target, out, expect=None):
     def window_rate(r):
         s = [x for x in samples[r.node] if x[2] == "running"]
         if len(s) >= 2 and s[-1][0] > s[0][0]:
-            return (s[-1][1] - s[0][1]) * 8 / (s[-1][0] - s[0][0]) / 1e6
+            return (s[-1][1] - s[0][1]) / (s[-1][0] - s[0][0]) / 1e6
         return -1
 
     if winner is None:
@@ -764,12 +772,14 @@ def race_download(st, cands, target, out, expect=None):
         _cleanup_race(part_dir)
         el = time.time() - winner.ttfb if winner.ttfb else 1
         print(f"下载完成 {out}（{winner.done / 1048576:.1f} MB via {winner.node}，"
-              f"均速 {winner.done * 8 / el / 1e6:.1f} MB/s）")
+              f"均速 {winner.done / el / 1e6:.1f} MB/s）")
         return True, 0
     if winner is not None:
         print(f"胜者 {winner.node} 中断（{winner.err}）")
     if best:
         shutil.copy(best, out + ".part")        # 顺序模式以最大进度续传
+        with open(out + ".part.url", "w", encoding="utf-8") as f:
+            f.write(target)
         print(f"保留进度 {best_off / 1048576:.1f} MB 转入顺序模式")
     _cleanup_race(part_dir)
     return False, best_off
@@ -781,18 +791,56 @@ def heal(st, reason):
     test(st, quiet=True)
 
 
+def _resume_state(path, target):
+    """断点续传状态：.part 与旁置 .url 元数据同时存在且 URL 匹配才续传，
+    否则视为残留（上次别的下载/远端已更新）删掉重下。返回可续传字节数"""
+    meta = path + ".url"
+    if os.path.exists(path):
+        try:
+            if os.path.exists(meta) and open(meta, encoding="utf-8").read().strip() == target:
+                return os.path.getsize(path)
+        except OSError:
+            pass
+        os.remove(path)
+    if os.path.exists(meta):
+        os.remove(meta)
+    with open(meta, "w", encoding="utf-8") as f:
+        f.write(target)
+    return 0
+
+
+def _clear_meta(path):
+    p = path + ".url"
+    if os.path.exists(p):
+        try:
+            os.remove(p)
+        except OSError:
+            pass
+
+
+def _clear_part(path):
+    for p in (path, path + ".url"):
+        if os.path.exists(p):
+            try:
+                os.remove(p)
+            except OSError:
+                pass
+
+
 def sequential_download(st, target, out, expect=None):
     """顺序模式：候选按延迟低->高逐节点尝试。失效 -> 下一个；正常但速率不达标 -> 下一个；
     连续 HEAL_FAILS 个失效 / 不达标触发自愈（collect+test 后重排序从头再试）"""
     floor = speed_floor(st)
     print(f"顺序模式：达标线 {floor} MB/s（本流满 {PROBE_WINDOW_BYTES // 1048576}MB 判速）")
     path = out + ".part"
+    resume = _resume_state(path, target)
     fails = slows = heals = 0
     while True:
         cands = download_candidates(st)
         if not cands:
             if heals >= HEAL_MAX:
                 print("无可用节点且自愈额度耗尽")
+                _clear_part(out + ".part")
                 return 1
             heal(st, "候选为空")
             heals += 1
@@ -804,10 +852,11 @@ def sequential_download(st, target, out, expect=None):
                 continue
             resume = os.path.getsize(path) if os.path.exists(path) else 0
             tag = f"[{i}/{len(cands)}] {k}" + (f"（续传 @{resume / 1048576:.1f}MB）" if resume else "")
-            state, mbps, total, err = stream_to_file(url, path, floor, resume, expect)
+            state, mbs, total, err = stream_to_file(url, path, floor, resume, expect)
             if state == "done":
                 os.replace(path, out)
-                print(f"{tag} 完成：{out} {total / 1048576:.1f} MB，均速 {mbps} MB/s")
+                _clear_meta(path)
+                print(f"{tag} 完成：{out} {total / 1048576:.1f} MB，均速 {mbs} MB/s")
                 return 0
             if state == "slow":
                 slows, fails = slows + 1, 0
@@ -816,6 +865,8 @@ def sequential_download(st, target, out, expect=None):
                     broke = True
                     break
             else:
+                if err.startswith("大小不符"):
+                    _clear_part(path)      # 镜像给了错误内容，已写前缀不可信，弃续传
                 fails, slows = fails + 1, 0
                 print(f"{tag} 失效（{err}）-> 下一个（连续失效 {fails}/{HEAL_FAILS}）")
                 if fails >= HEAL_FAILS:
@@ -825,6 +876,7 @@ def sequential_download(st, target, out, expect=None):
             print(f"全部 {len(cands)} 个候选尝试未成功")
         if heals >= HEAL_MAX:
             print(f"自愈额度（{HEAL_MAX} 次）耗尽，放弃")
+            _clear_part(path)
             return 1
         heal(st, "连续 %d 个失效/不达标" % HEAL_FAILS if broke else "全池尝试未成功")
         heals += 1
@@ -844,11 +896,18 @@ def cmd_download(st, target, out=None):
             print("无可用节点")
             return 1
     size = probe_size(cands, target)
-    print(f"文件大小：{size / 1048576:.1f} MB（>10MB 走竞速）" if size else "文件大小：未知（直接顺序模式）")
-    if size and size > RACE_BIG_BYTES:
-        ok, _off = race_download(st, cands, target, out, size)
-        if ok:
+    if size is None:
+        print("文件大小：未知（直接顺序模式）")
+    else:
+        print(f"文件大小：{size / 1048576:.1f} MB（>10MB 走竞速）")
+        if size == 0:                       # 空文件：0 是合法 Content-Length，直接落盘
+            open(out, "wb").close()
+            print(f"空文件，已落盘 {out}")
             return 0
+        if size > RACE_BIG_BYTES:
+            ok, _off = race_download(st, cands, target, out, size)
+            if ok:
+                return 0
     return sequential_download(st, target, out, size)
 
 
