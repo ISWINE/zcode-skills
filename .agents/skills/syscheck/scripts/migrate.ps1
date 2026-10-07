@@ -1,14 +1,21 @@
-# migrate.ps1 - Junction migration C -> D:\cshift farm (cold data only!)
-# Usage (elevated NOT required): powershell -NoProfile -ExecutionPolicy Bypass -File migrate.ps1 -src "C:\Users\12696\.foo"
+# migrate.ps1 - Junction migration to data-drive farm (cold data only!)
+# Usage (elevated NOT required): powershell -NoProfile -ExecutionPolicy Bypass -File migrate.ps1 -src "C:\Users\<u>\.foo" [-dst "E:\farm\<name>"]
 # Flow: robocopy /COPY:DAT -> count verify -> delete source -> create junction -> probe read.
 # ASCII only. robocopy /COPYALL needs admin (audit bit); /COPY:DAT is enough for user files.
-param([string]$src)
+# dst default: largest non-system fixed NTFS volume \cshift\Users\<current user>\<name> (portable).
+param([string]$src, [string]$dst)
 if (-not $src -or -not (Test-Path -LiteralPath $src)) { Write-Output "SRC_NOT_FOUND: $src"; exit 9 }
 $item = Get-Item -LiteralPath $src -Force
 if ($item.LinkType) { Write-Output "SRC_IS_ALREADY_LINK: $src ($($item.LinkType))"; exit 8 }
 
 $name = Split-Path $src -Leaf
-$dst = "D:\cshift\Users\12696\$name"
+if (-not $dst) {
+  $vol = Get-CimInstance Win32_LogicalDisk -Filter 'DriveType=3' |
+         Where-Object { $_.DeviceID -ne $env:SystemDrive -and $_.FileSystem -eq 'NTFS' } |
+         Sort-Object Size -Descending | Select-Object -First 1
+  if (-not $vol) { Write-Output 'NO_NTFS_DATA_DRIVE (pass -dst explicitly)'; exit 6 }
+  $dst = "{0}\cshift\Users\{1}\{2}" -f $vol.DeviceID, $env:USERNAME, $name
+}
 if (Test-Path -LiteralPath $dst) { Write-Output "DST_EXISTS_ALREADY: $dst"; exit 7 }
 
 Write-Output "MIGRATE $name -> $dst"

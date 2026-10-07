@@ -55,5 +55,5 @@ Get-ChildItem "$env:APPDATA\JetBrains\*\plugins" -Directory |
 
 Write-Host "`n=== [8] START-MENU LNK sweep ==="
 Get-ChildItem "$env:APPDATA\Microsoft\Windows\Start Menu\Programs",
-              'C:\ProgramData\Microsoft\Windows\Start Menu\Programs' -Recurse -Filter *.lnk |
+              "$env:ProgramData\Microsoft\Windows\Start Menu\Programs" -Recurse -Filter *.lnk |
   Select-Object -ExpandProperty Name | Sort-Object -Unique

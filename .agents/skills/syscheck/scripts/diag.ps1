@@ -12,13 +12,13 @@ Write-Host "=== [2] TRIM (0 = correct) ==="
 fsutil behavior query DisableDeleteNotify 2>&1
 
 Write-Host "=== [3] Root big files (hiberfil/pagefile) ==="
-Get-ChildItem C:\ -Force -File | Where-Object { $_.Length -gt 100MB } |
+Get-ChildItem "$env:SystemDrive\" -Force -File | Where-Object { $_.Length -gt 100MB } |
   ForEach-Object { "{0,8:N1} GB  {1}" -f ($_.Length/1GB), $_.Name }
 
 Write-Host "=== [4] Crash dumps ==="
-$md = Get-Item C:\Windows\MEMORY.DMP
+$md = Get-Item "$env:windir\MEMORY.DMP"
 if ($md) { "MEMORY.DMP: {0:N1} GB" -f ($md.Length/1GB) } else { "no MEMORY.DMP" }
-$mini = @(Get-ChildItem C:\Windows\Minidump -File).Count; "minidumps: $mini"
+$mini = @(Get-ChildItem "$env:windir\Minidump" -File).Count; "minidumps: $mini"
 
 Write-Host "=== [5] Pending reboot ==="
 $rb = @()
@@ -38,10 +38,10 @@ Get-Service | Where-Object { $_.StartType -eq 'Automatic' -and $_.Status -ne 'Ru
   Select-Object Name,DisplayName | Format-Table -AutoSize
 
 Write-Host "=== [9] Update cache size ==="
-"{0,8:N1} MB  SoftwareDistribution\Download" -f ((Get-ChildItem 'C:\Windows\SoftwareDistribution\Download' -Recurse -Force | Measure-Object Length -Sum).Sum/1MB)
+"{0,8:N1} MB  SoftwareDistribution\Download" -f ((Get-ChildItem "$env:windir\SoftwareDistribution\Download" -Recurse -Force | Measure-Object Length -Sum).Sum/1MB)
 
 Write-Host "=== [10] Installer size (>2GB = run orphan cross-ref) ==="
-"{0,8:N2} GB  C:\Windows\Installer" -f ((Get-ChildItem 'C:\Windows\Installer' -Recurse -Force | Measure-Object Length -Sum).Sum/1GB)
+"{0,8:N2} GB  $env:windir\Installer" -f ((Get-ChildItem "$env:windir\Installer" -Recurse -Force | Measure-Object Length -Sum).Sum/1GB)
 
 Write-Host "=== [11] Listening ports (non-localhost) ==="
 Get-NetTCPConnection -State Listen | Where-Object { $_.LocalAddress -notmatch '::1|127\.0\.0\.1' } |
@@ -52,5 +52,5 @@ Write-Host "=== [12] WinINET proxy (dev-sidecar landmine: ProxyEnable=0 is harml
 Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings' |
   Select-Object ProxyEnable,AutoConfigURL | Format-List
 
-Write-Host "=== [13] C drive ==="
-Get-PSDrive C | Select-Object @{n='UsedGB';e={[math]::Round($_.Used/1GB)}},@{n='FreeGB';e={[math]::Round($_.Free/1GB)}} | Format-List
+Write-Host "=== [13] System drive ==="
+Get-PSDrive ($env:SystemDrive.TrimEnd(':')) | Select-Object @{n='UsedGB';e={[math]::Round($_.Used/1GB)}},@{n='FreeGB';e={[math]::Round($_.Free/1GB)}} | Format-List

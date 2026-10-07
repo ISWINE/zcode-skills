@@ -53,6 +53,10 @@
     **ProgId/键名比对必须看长度与首字符码**：本机 Bambu Studio 注册的 ProgId 真名是 ` Bambu.Studio.1`（**带前导空格**，长度 15、首字符码 32），带空格可解析、不带空格返回 False —— 我肉眼扫空格时得出过相反的（错误）结论。`"$name".Length` + `[int][char]$name[0]` 一查就清楚。
     **元教训**：我先前凭"UCPD 会拦"的机制推测就下了"风险大于收益、建议不做"的结论 —— **"做不到"的判断也要先实测再下**。
 
+29. **es.exe 不是独立程序（2026-10-07 实测）**：es.exe 只是 everything.exe 的 IPC 遥控器，引擎没跑就是一句 `Error 8: Everything IPC not found`，什么都查不了。所谓"用 es 加速"的完整闭环=拉起 everything.exe → es 查询 → 用完 `-exit` 复原。新机器自补给要下载**便携整包**（含双 exe），只下 es.exe 没有意义。
+30. **提权 Everything 收不回来（2026-10-07 实测）**：便携 everything.exe 读 NTFS MFT 要管理员，本机启动时自申请提权（UAC 被点掉后成为提权实例）。后果链：非提权 es.exe 的 `-exit` 消息被 UIPI 静默拦截且 **es.exe 调用本身挂死**（不是报错返回）；非提权 taskkill/Stop-Process 拒绝访问；Get-Process 看不到其 Path。教训：**任何"发消息控制可能提权的进程"的收尾步骤必须限时兜底**（Start-Job + Wait-Job -Timeout），并如实报告残留，绝不能裸调。杀提权实例只能再提权一次（UAC taskkill）。
+31. **PS 函数的管道污染（2026-10-07 实测）**：函数里 `Write-Output` 状态行 + `return $rows`，调用方 `$x = Func` 拿到的是 `[状态行, rows]` 混合数组——下游 Group/Sort/Measure 全炸（Null 调用、0.00 GB 假行）。**函数要既回报状态又返回数据时，状态一律 `Write-Host`（走宿主流，不进管道）**。另：EFU 是 UTF-8，PS5.1 的 `Import-Csv` 不加 `-Encoding UTF8` 会把中文路径读成乱码。
+
 ## 本机档案（易变，以清单文件为准）
 
 - 联接农场全表：`E:\笔记\笔记\系统软件清单.md` §9（12 条）
