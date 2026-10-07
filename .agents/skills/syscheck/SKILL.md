@@ -11,7 +11,7 @@ description: Windows 系统深度体检与清理（deep system check & cleanup�
 
 1. 跑 `scripts/init.ps1`（非提权 ~10 秒），拿机器画像：OS/硬件/卷与文件系统/是否提权/PS 版本/工具探测（es.exe、Everything、winget）。
 2. **harness 自识别 = 看自己**：你跑在什么环境里自己的提示词和工具集就是证据（ZCode/Claude Code/Codex/Gemini CLI/纯人工终端），直接写进报告头，不做任何脚本探测。
-3. **家机/陌生机判定 = 写死路径的存在性**：es.exe 写死 `E:\*\Everything*\es.exe`，清单回写写死 `E:\笔记\笔记\系统软件清单.md`。写死的检查得到 → 家机（用写死的 es.exe、复用清单快照、本机专属红线生效、报告回写清单）；检查不到 → 肯定是新机器（陌生机）：es.exe 直接下载到工作区，清单不复用不回写，红线只取通用集，报告头标注陌生机。此判定只影响这些，**不影响流程——两种机器都一条龙直跑**。
+3. **家机/陌生机判定 = 写死路径的存在性**：es.exe 写死 `E:\*\Everything*\es.exe`，清单回写写死 `E:\笔记\笔记\系统软件清单.md`。写死的检查得到 → 家机（用写死的 es.exe、复用清单快照、报告回写清单）；检查不到 → 肯定是新机器（陌生机）：es.exe 直接下载到工作区，清单不复用不回写，机器拓扑（联接、敏感目录）自己从头建立，报告头标注陌生机。此判定只影响这些，**不影响流程——两种机器都一条龙直跑**。红线是合并写死的全量清单，不分通用/专属，两种机器照单执行。
 4. 报告与工件输出目录：`<当前工作区>\syscheck-out\<yyyyMMdd-HHmm>\`，不做任何盘符假设。
 
 ## 第 1 步：es.exe 就位（写死路径；查不到 = 新机器 = 直接下载，不问）
@@ -67,23 +67,22 @@ description: Windows 系统深度体检与清理（deep system check & cleanup�
 - **陷阱**：多词查询必须 `-search` 传（位置参数会被搅碎）；`!path:` 排除不可靠→排除在 PowerShell 层做；默认只回 64 条，必须 `-n` 拉大、结果**绝不 head 截断**（会静默漏文件）；EFU 行 attribute 带 0x10 位是目录；es.exe 报 Error 8=Everything 没跑（esquick.ps1 已自动处理）。
 - **覆盖缺口**：只索引 NTFS 卷，FAT/exFAT/网络卷不在内——报告必须标注哪些卷没被覆盖。
 
-## 通用红线（任何机器，任何 harness）
+## 红线（合并写死，任何机器全量照单执行；新机器上家机路径不存在即自动失效）
 
-1. **删除任何目录前先查联接**：`cmd //c dir /AL <目录>`。联接可埋在深层，逐目录查不能只查顶层；删联接侧=毁真身数据。
-2. **永不触碰**：agent 自身运行时与记忆目录、`AppData\Local\Microsoft`、`AppData\Local\Packages`、Temp 内 24 小时新文件、用户 Documents/Downloads/项目目录。
+1. **删除任何目录前先查联接**：`cmd //c dir /AL <目录>`。联接可埋在深层，逐目录查不能只查顶层；删联接侧=毁真身数据。家机联接农场真身=`D:\cshift`（全表见 `E:\笔记\笔记\系统软件清单.md` §9）；新机器无预知拓扑，扫描中自己从头建立（逐目录 dir /AL + 白名单交叉），只信当场实测。
+2. **永不触碰（写死全量）**：agent 自身运行时与记忆目录、`~/.zcode`、`D:\cshift` 整体、`KimiData`、PCManger/华为目录、`Documents\dsh`、`AppData\Local\Microsoft`、`AppData\Local\Packages`、Temp 内 24 小时新文件、用户 Documents/Downloads/项目目录。
 3. **提权脚本必须纯 ASCII**（PS 5.1 按 GBK 读无 BOM UTF-8，中文行静默失效）；不用 .cmd（LF 行尾会碎）。
 4. **Git Bash 吞 robocopy 开关**（MSYS 路径转换）：robocopy 一律走 .ps1 文件或 `MSYS_NO_PATHCONV=1`。
 5. **声明成功前必须有回执**：日志落盘+回读验证，别信返回码单独作证。
 6. 陌生机器的"读不到"先排除权限（`wevtutil gl` 看 channelAccess）再下"结构性缺口"结论；非提权 SMART 全断，只能报"数据缺口"，不能报"健康"。
 
-## 本机专属档案（仅家机模式生效；陌生机以 init.ps1 实测为准）
+## 家机写死档案（写死路径查得到才是家机；查不到=新机器，本节不适用，一切当场实测）
 
 - harness：ZCode。es.exe=`E:\软件\Everything-1.4.1.1032.x64\es.exe`（便携版，Everything 平时不驻留，用完 `-exit` 复原；脚本用 `E:\*\Everything*\es.exe` 通配定位以保持 ASCII）。
 - 本机提权怪癖（2026-10-07 实测）：从这里拉起 everything.exe 会自申请管理员（UAC 点一次），提权后非提权 es.exe 的 `-exit` 被 UIPI 拦死（会挂）→ esquick 收尾已改为限时 job + Stop-Process 兜底 + 如实报告残留；真杀提权实例需再走一次提权 taskkill。
-- 真相源（家机判定依据）：`E:\笔记\笔记\系统软件清单.md` §9 联接表 / §12-13 体检记录。联接农场真身 `D:\cshift`（.gradle/.m2/.cargo/.rustup/.android/Roaming\npm 等 12 条）。
-- 专属红线：`~/.zcode`、`D:\cshift` 整体、`KimiData`、PCManger/华为目录、`Documents\dsh`。
+- 真相源与回写：`E:\笔记\笔记\系统软件清单.md` §9 联接表 / §12-13 体检记录；完成后把变更写回清单并更新文首日期，重大陷阱写记忆、明细写清单，防两处漂移。
 - 用户在案决定：BitLocker 不开（性能优先）；dev-sidecar 休眠代理残留不处理；商店版预装应用不主动卸。
-- 完成后把变更写回清单文件并更新文首日期；重大陷阱写记忆，明细写清单，防两处漂移。
+- 新机器：无档案可复用——快照、在案决定都没有，联接/敏感目录拓扑由 agent 在 INIT/groundtruth 里自己从头建立，结论只信当场实测。
 
 ## 迁移配方（C→D 联接搬迁）
 
