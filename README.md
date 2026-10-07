@@ -13,7 +13,8 @@
 | `github-proxy` | GitHub 国内随机屏蔽自愈：镜像代理池（种子+scriptcat+聚合API 三层采集）→ 双探针测速 → 基线中位数 → 劣化自动换线；apply 后 git clone/raw/codeload 全透明走镜像 | GitHub 打不开/clone 慢/raw 超时/push 失败时自动触发，或说"换镜像/加速 github" |
 | `nvidia-img` | 英伟达（NVIDIA build.nvidia.com）免费生图：flux.1-dev 直调（约 12s/张 JPEG），key 自动从 ZCode 配置读不入库；即梦生图的免费替补 | 说"英伟达生图/NVIDIA 生图/flux 生图/用英伟达画一张/nvimg"自动触发 |
 | `ocr-codereview` | 阿里 OpenCodeReview（ocr CLI）AI 代码审查：工作区/单 commit/分支/全文件扫描/委托模式五种玩法，本机已配免费 coding plan 端点，行级定位+修复建议 | 说"ocr 审查/审审代码/code review/审这个提交/扫一下这个库"自动触发 |
-| `playwright-toolkit` | Playwright 本机工具箱：npmmirror 镜像装 Chromium、cookie 注入开登录态页面、SPA 接口抓取（response 监听让页面自己暴露 API）、表单/文件上传自动化；附 B 站全代码投稿实录（扫码登录→抓稿件接口→upos 分片→edit 全量 videos[]） | 说"用 Playwright/抓接口/登录态页面自动化/装 Chromium/浏览器镜像"自动触发 |
+| `playwright-toolkit` | Playwright 本机工具箱：npmmirror 镜像装 Chromium、cookie 注入开登录态页面、SPA 接口抓取（response 监听让页面自己暴露 API）、表单/文件上传自动化；站点级工作流（biliup 等）以它为子集 | 说"用 Playwright/抓接口/登录态页面自动化/装 Chromium/浏览器镜像"自动触发 |
+| `biliup` | B 站全代码投稿：扫码登录拿 cookie → Playwright 抓稿件接口（archive/view 全量分 P filename+cid）→ upos 分片直传 → edit 编辑稿件（更换分 P 视频/追加分 P，全量 videos[] 顺序保证，断点续传，不碰 GUI 文件框）；代码真身 text/xiyouji/bili_up/ | 说"传B站/投稿/换分P/追加分P/更换分P视频/B站上传"自动触发 |
 
 ## 本机部署方式（junction 联接）
 

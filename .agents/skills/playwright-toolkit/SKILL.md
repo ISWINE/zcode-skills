@@ -1,6 +1,6 @@
 ---
 name: playwright-toolkit
-description: Playwright 本机工具箱：npmmirror 镜像装 Chromium、cookie 注入开登录态页面、SPA 内部接口抓取（response 监听一击必中）、表单/文件上传自动化。当任务需要真实浏览器渲染/登录态/抓网页背后的 XHR 接口/绕开反爬 UA 检查，或用户说"用 Playwright/抓接口/浏览器自动化/装 Chromium/浏览器镜像"时使用。含 B 站代码投稿全程实录参考。
+description: Playwright 本机工具箱：npmmirror 镜像装 Chromium、cookie 注入开登录态页面、SPA 接口抓取（response 监听一击必中）、表单/文件上传自动化。当任务需要真实浏览器渲染/登录态/抓网页背后的 XHR 接口，或用户说"用 Playwright/抓接口/浏览器自动化/装 Chromium/浏览器镜像"时使用。B 站投稿（biliup 技能）等站点级工作流以本工具箱为子集。
 ---
 
 # Playwright 工具箱
@@ -38,7 +38,7 @@ ctx.add_cookies([{"name": k, "value": v, "domain": ".xxx.com", "path": "/"}
 ```
 
 cookie 来源两条正道：
-1. **目标站扫码登录 API**（推荐，见 references/bilibili-code-upload.md：generate 出二维码 → cmd start 弹图 → poll 轮询 → Set-Cookie 响应头里拿 SESSDATA 类字段）
+1. **目标站扫码登录 API**（推荐；完整范例见 biliup 技能：generate 出二维码 → cmd start 弹图 → poll 轮询 → Set-Cookie 响应头里拿会话字段）
 2. 用户提供的 cookies.json
 
 **邪路（勿走）**：偷运行中浏览器的 cookie 库——Chromium 127+ 全 v20 app-bound 加密，DPAPI 用户密钥解不开（InvalidTag），绕过需伪装浏览器进程=入侵技术；Edge/Chrome 默认 profile 已禁 `--remote-debugging-port`（CDP 连不上）。死路别再试。
@@ -76,7 +76,9 @@ time.sleep(12)                                                # 给异步 XHR �
 | `python x.py \| tail` 吞退出码 | 假成功陷阱 → `set -o pipefail`，或后台任务读完整日志 |
 | 中文路径/参数在 MSYS bash | python -c 里用 `C:/` 不用 `/c/`；`$ _` 等会被路径转换 → 写进 .ps1/.py 文件再调 |
 
-## 6. 参考案例
+## 6. 站点级应用（以本工具箱为子集）
 
-`references/bilibili-code-upload.md` —— 2026-10-07 B 站全代码投稿实录：
-扫码登录 → 本工具抓出 `x/vupre/web/archive/view`（分 P filename+cid+稿件字段全量）→ upos 三步分片上传 → `x/vu/web/edit` 全量 videos[] 编辑（换分 P/追加分 P 顺序保证）。可运行代码在 `C:\Users\12696\Documents\z-code\text\xiyouji\bili_up\`。
+- **biliup 技能**：B 站全代码投稿（扫码登录→本工具抓稿件接口→upos 分片→edit 编辑分 P），
+  实录在其 `references/full-case-20261007.md`，可运行代码 `text/xiyouji/bili_up/`。
+- 新站点工作流照此模式拆：通用手法留在本技能，站点端点/业务规则独立成技能。
+
