@@ -39,7 +39,7 @@ function Find-Es {
 
 $es = Find-Es $EsPath
 if (-not $es) {
-  Write-Output 'ES_NOT_FOUND - download the Everything portable zip into the workspace (see SKILL.md Phase A), or pass -EsPath; rough file-face skipped.'
+  Write-Output 'ES_NOT_FOUND - download the Everything portable zip into the workspace (see SKILL.md Step 1), or pass -EsPath; rough file-face skipped.'
   exit 0
 }
 $everythingExe = Join-Path (Split-Path $es) 'everything.exe'
