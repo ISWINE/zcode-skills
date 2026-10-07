@@ -12,7 +12,7 @@
 2. PS 5.1 不认 `ushort[]` 字面量，数组要用 `[uint16[]]::new(256)`。
 3. **截图验证不了伽马**：CopyFromScreen 抓的是 LUT 之前的帧缓冲，所以必须 `GetDeviceGammaRamp` 回读验证；同理用户开着此效果时截图颜色是"正常"的。
 
-LUT 是易失的（重启/注销/部分驱动事件清空）→ 计划任务每小时自愈 + 登录补射。**固定 5000K 常驻，不随时间变化**（曾有 7/18/22 点三档自动切换，用户对自动换档不习惯，2026-10-08 定稿为常驻）。
+LUT 是易失的（重启/注销/部分驱动事件清空）→ 登录任务兜底 + 每天两个切换点定时：**07:00 → 5000K，22:00 → 4200K**（2026-10-08 定稿：用户确认两档均可、白天不回中性；每小时自愈方案因 powershell 每小时闪窗被否，一律走 wscript 无窗启动器）。
 
 ## 改法
 
@@ -57,7 +57,9 @@ function Get-ChannelValue([double]$t, [string]$ch) {
 }
 
 if ($Auto) {
-  $Temp = 5000
+  $h = (Get-Date).Hour
+  if ($h -ge 7 -and $h -lt 22) { $Temp = 5000 }
+  else                          { $Temp = 4200 }
 }
 
 $dc = [GammaHelper]::GetDC([IntPtr]::Zero)
@@ -96,14 +98,16 @@ Write-Output ("set={0} readback ramp[255]: R={1} G={2} B={3}" -f $ok, $check.red
 定时（Git Bash 记得 `MSYS_NO_PATHCONV=1`）：
 
 ```bash
-# 每小时自愈+换档（用户级可建，无需管理员）
-MSYS_NO_PATHCONV=1 schtasks /create /tn "SetGamma-Hourly" /tr "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File D:\tools\SetGamma\SetGamma.ps1 -Auto" /sc hourly /mo 1 /f
-
-# 登录即生效：onlogon 触发器要管理员，走 UAC 提权建（弹窗，用户点"是"）：
-powershell -NoProfile -Command "Start-Process schtasks.exe -Verb RunAs -ArgumentList '/create /tn \"SetGamma-Logon\" /tr \"powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File D:\tools\SetGamma\SetGamma.ps1 -Auto\" /sc onlogon /f' -Wait"
-# 提权建的 onlogon 任务，当前用户非提权也能 schtasks /run 手动试跑（实测可触发）。
-# 无管理员时的替代：启动文件夹无闪窗 VBS（%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\SetGamma.vbs，一行）：
+# 无闪窗启动器（wscript 是 GUI 子系统，零窗口）。D:\tools\SetGamma\apply.vbs 一行：
 # CreateObject("WScript.Shell").Run "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File D:\tools\SetGamma\SetGamma.ps1 -Auto", 0, False
+
+# 每天只在两档切换点跑（用户级可建；每小时自愈已废弃=powershell 每小时闪窗惹用户嫌）
+MSYS_NO_PATHCONV=1 schtasks /create /tn "SetGamma-Day" /tr "wscript.exe \"D:\tools\SetGamma\apply.vbs\"" /sc daily /st 07:00 /f
+MSYS_NO_PATHCONV=1 schtasks /create /tn "SetGamma-Night" /tr "wscript.exe \"D:\tools\SetGamma\apply.vbs\"" /sc daily /st 22:00 /f
+
+# 登录兜底（重启清 LUT/关机错过切换点时补齐）：onlogon 要管理员，UAC 提权跑脚本文件执行。
+# 坑：Start-Process -ArgumentList 直接传含内嵌引号的 /tr 会穿 UAC 碎掉（实测 exit 1），必须提权执行 .ps1、在脚本内部用 PS 引号传参、结果落日志+回读 XML <Command> 验证。
+# change2.ps1 核心行：& schtasks.exe /change /tn "SetGamma-Logon" /tr 'wscript.exe "D:\tools\SetGamma\apply.vbs"' *> $log
 ```
 
 GUI 等价：系统自带"夜灯"（设置 > 系统 > 显示 > 夜灯）也能暖色+日落日出调度，但强度只有档位、无时间表细控；上述方案是它的无依赖精细版。
@@ -123,8 +127,9 @@ MSYS_NO_PATHCONV=1 schtasks /run /tn "SetGamma-Hourly"
 ## 回滚 / 变体
 
 ```bash
-MSYS_NO_PATHCONV=1 schtasks /delete /tn "SetGamma-Hourly" /f
-powershell -NoProfile -Command "Start-Process schtasks.exe -Verb RunAs -ArgumentList '/delete /tn \"SetGamma-Logon\" /f' -Wait"   # 提权删；用了 VBS 替代则改为删 Startup\SetGamma.vbs
+MSYS_NO_PATHCONV=1 schtasks /delete /tn "SetGamma-Day" /f
+MSYS_NO_PATHCONV=1 schtasks /delete /tn "SetGamma-Night" /f
+# 删 SetGamma-Logon 需提权：同上 UAC + 脚本文件方式跑 & schtasks /delete /tn "SetGamma-Logon" /f
 powershell -NoProfile -ExecutionPolicy Bypass -File D:\tools\SetGamma\SetGamma.ps1 -Reset   # 立即恢复 6500K
 ```
 
