@@ -102,9 +102,10 @@ Write-Output ("set={0} readback ramp[255]: R={1} G={2} B={3}" -f $ok, $check.red
 # 每小时自愈+换档（用户级可建，无需管理员）
 MSYS_NO_PATHCONV=1 schtasks /create /tn "SetGamma-Hourly" /tr "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File D:\tools\SetGamma\SetGamma.ps1 -Auto" /sc hourly /mo 1 /f
 
-# 登录即生效：onlogon 触发器 schtasks 会拒绝访问（要管理员），
-# 改放启动文件夹（无闪窗）：%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\SetGamma.vbs
-# 内容一行：
+# 登录即生效：onlogon 触发器要管理员，走 UAC 提权建（弹窗，用户点"是"）：
+powershell -NoProfile -Command "Start-Process schtasks.exe -Verb RunAs -ArgumentList '/create /tn \"SetGamma-Logon\" /tr \"powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File D:\tools\SetGamma\SetGamma.ps1 -Auto\" /sc onlogon /f' -Wait"
+# 提权建的 onlogon 任务，当前用户非提权也能 schtasks /run 手动试跑（实测可触发）。
+# 无管理员时的替代：启动文件夹无闪窗 VBS（%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\SetGamma.vbs，一行）：
 # CreateObject("WScript.Shell").Run "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File D:\tools\SetGamma\SetGamma.ps1 -Auto", 0, False
 ```
 
@@ -126,7 +127,7 @@ MSYS_NO_PATHCONV=1 schtasks /run /tn "SetGamma-Hourly"
 
 ```bash
 MSYS_NO_PATHCONV=1 schtasks /delete /tn "SetGamma-Hourly" /f
-del "%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\SetGamma.vbs"
+powershell -NoProfile -Command "Start-Process schtasks.exe -Verb RunAs -ArgumentList '/delete /tn \"SetGamma-Logon\" /f' -Wait"   # 提权删；用了 VBS 替代则改为删 Startup\SetGamma.vbs
 powershell -NoProfile -ExecutionPolicy Bypass -File D:\tools\SetGamma\SetGamma.ps1 -Reset   # 立即恢复 6500K
 ```
 
