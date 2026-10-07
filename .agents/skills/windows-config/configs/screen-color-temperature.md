@@ -12,7 +12,7 @@
 2. PS 5.1 不认 `ushort[]` 字面量，数组要用 `[uint16[]]::new(256)`。
 3. **截图验证不了伽马**：CopyFromScreen 抓的是 LUT 之前的帧缓冲，所以必须 `GetDeviceGammaRamp` 回读验证；同理用户开着此效果时截图颜色是"正常"的。
 
-LUT 是易失的（重启/注销/部分驱动事件清空）→ 计划任务每小时自愈 + 登录补射。时间表：7-18 点 6500K（中性）、18-22 点 5000K（暖白）、22-次日 7 点 4200K（琥珀）。
+LUT 是易失的（重启/注销/部分驱动事件清空）→ 计划任务每小时自愈 + 登录补射。**固定 5000K 常驻，不随时间变化**（曾有 7/18/22 点三档自动切换，用户对自动换档不习惯，2026-10-08 定稿为常驻）。
 
 ## 改法
 
@@ -57,10 +57,7 @@ function Get-ChannelValue([double]$t, [string]$ch) {
 }
 
 if ($Auto) {
-  $h = (Get-Date).Hour
-  if ($h -ge 7 -and $h -lt 18)      { $Temp = 6500 }
-  elseif ($h -ge 18 -and $h -lt 22) { $Temp = 5000 }
-  else                              { $Temp = 4200 }
+  $Temp = 5000
 }
 
 $dc = [GammaHelper]::GetDC([IntPtr]::Zero)
@@ -131,8 +128,7 @@ powershell -NoProfile -Command "Start-Process schtasks.exe -Verb RunAs -Argument
 powershell -NoProfile -ExecutionPolicy Bypass -File D:\tools\SetGamma\SetGamma.ps1 -Reset   # 立即恢复 6500K
 ```
 
-- 手动档：`-Temp 4200|4500|5000|5500|5800`；压亮度不变色：`-Dim 0.9`。
-- 时间表边界（7/18/22 点）改脚本 `-Auto` 段即可。
+- 手动档：`-Temp 4200|4500|5000|5500|5800`；压亮度不变色：`-Dim 0.9`；恢复分时段自动（如白天 6500/晚上 5000）改脚本 `-Auto` 段即可。
 - 亮度是独立维度：内屏走 WMI（`root/WMI WmiMonitorBrightness`），本机 40% 晚间已合适未动。
 
 已验证 2026-10-07，本机 Windows 11 内测版 26300（计划任务端到端实测：Reset→/run→10s 后回读 5000K 斜坡分毫不差）
