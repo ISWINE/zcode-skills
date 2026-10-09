@@ -89,4 +89,5 @@ python ...ghproxy.py download https://github.com/u/r/releases/download/v1/x.exe 
 - 想找回 GUI 登录框：`git config --global --add credential.helper manager`
 
 4. 手动 curl 验证镜像须带 `--ssl-no-revoke`（dev-sidecar 证书 + schannel 吊销检查）
-5. **探针通过 ≠ 大流量可用**（2026-10-09 晚实锤）：rank 显示 edgeone 43.89MB/s 探针健康，但 git clone 与 download zip 双双无输出挂死——小文件探针过得去、持续大流量被限时掐。自救通道：`gh api repos/<owner>/<repo>/tarball/main > repo.tar.gz`（gh CLI 的 api.github.com 直连当晚全程可用，2.5MB 仓库秒取；clone 挂死先试这条，别反复重试镜像）
+5. **探针通过 ≠ 大流量可用**（2026-10-09 晚实锤）：rank 显示 edgeone 43.89MB/s 探针健康，但 git clone 与 download zip 双双无输出挂死——小文件探针过得去、持续大流量被限时掐。自救通道：`gh api repos/<owner>/<repo>/tarball/main > repo.tar.gz`（gh CLI 的 api.github.com 当晚全程可用；注意 16MB 仓库的 tarball 也算大流量，10MB+ 建议后台跑或限时分段）
+6. **调研类任务优先小报文 API 通道，别抢整包**：`gh api search/code?q=repo:<o>/<r>+<关键词>`（代码级取证，免下载）+ `gh api repos/<o>/<r>/contents/<路径>`（单文件 base64，秒级）能回答 90% 调研问题；整包只在做全量扫描时才要，此时可让 api.gitproxy.dev 后台慢爬（实测 ~53KB/s 慢但稳，支持断点续传 -C -）
