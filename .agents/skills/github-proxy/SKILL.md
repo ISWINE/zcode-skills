@@ -60,6 +60,16 @@ python ...ghproxy.py download https://github.com/u/r/releases/download/v1/x.exe 
 - 排名：clone 可用(+1000) > zip(+100) > raw(+10) > 吞吐；直连吞吐≥代理×2 时建议直连
 - apply 写 4 条全局 git 配置：github/raw/codeload 三主机 insteadOf + 镜像主机 per-host 空代理（绕过 dev-sidecar）；off 全清
 
+## 手动备选镜像：gitproxy.dev（池外补充，2026-10-09 实测三通）
+
+- 前缀域名是 **`api.gitproxy.dev`**（注意：`https://gitproxy.dev/<url>` 只是 UI 转换页，直接当代理用会 307 转义成 `https%3A` → 404）
+- 用法（路径不带 scheme，只换域名）：
+  - raw：`https://api.gitproxy.dev/raw.githubusercontent.com/u/r/main/f`
+  - release/archive：`https://api.gitproxy.dev/github.com/u/r/releases/download/v1/x.exe`
+  - clone：`git clone https://api.gitproxy.dev/github.com/u/r.git`（ls-remote 实测可用）
+- 特性：CF Workers 部署、大文件不缓存直接转发、支持断点续传；官方称私有库可自带凭据——**按本仓凭据红线，勿向任何镜像喂 token**
+- 定位：池集体趴窝时的手动替补（2026-10-09 晚全池大流量挂死时它三通道仍可用，release 实测 ~0.2MB/s，慢但能通）
+
 ## 本机已知坑（详见 references/pitfalls.md）
 
 1. dev-sidecar 全局 `http.proxy=127.0.0.1:31180` 会毁掉镜像内嵌 github.com 的 git 请求 → 已用 per-host 空代理解决，勿删
@@ -79,3 +89,4 @@ python ...ghproxy.py download https://github.com/u/r/releases/download/v1/x.exe 
 - 想找回 GUI 登录框：`git config --global --add credential.helper manager`
 
 4. 手动 curl 验证镜像须带 `--ssl-no-revoke`（dev-sidecar 证书 + schannel 吊销检查）
+5. **探针通过 ≠ 大流量可用**（2026-10-09 晚实锤）：rank 显示 edgeone 43.89MB/s 探针健康，但 git clone 与 download zip 双双无输出挂死——小文件探针过得去、持续大流量被限时掐。自救通道：`gh api repos/<owner>/<repo>/tarball/main > repo.tar.gz`（gh CLI 的 api.github.com 直连当晚全程可用，2.5MB 仓库秒取；clone 挂死先试这条，别反复重试镜像）
