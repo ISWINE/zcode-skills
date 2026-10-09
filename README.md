@@ -2,6 +2,8 @@
 
 个人 ZCode 技能仓库（personal agent skills）。目录结构遵循 ZCode 技能发现规范：`.agents/skills/<name>/SKILL.md`——整个仓库克隆到任何项目目录下，里面的技能即可被 ZCode 项目级发现自动加载。
 
+> **分仓规则**：本仓库只收通用/常规技能；信息安全方向（逆向、样本分析、渗透、取证）的技能一律进姊妹仓库 [infosec-skills](https://github.com/ISWINE/infosec-skills)，两仓遵循同一套结构规范。
+
 ## 当前技能
 
 | 技能 | 用途 | 触发方式 |
