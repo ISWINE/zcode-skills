@@ -70,6 +70,13 @@ SPEED_FLOOR_RATIO = 0.3             # 相对达标线 = 池基线吞吐中位数
 PROBE_WINDOW_BYTES = 1024 * 1024    # 顺序模式：本流下载满 1MB 时判速（更小文件能下即成功）
 HEAL_FAILS = 5                      # 连续 N 个节点失效 / 不达标 -> 自愈
 HEAL_MAX = 3                        # 单次下载自愈次数上限
+# 限速检测（2026-10-09 晚实锤：探针小文件全绿、真实大流量全池挂死）
+RAMPUP_SEC = 5                      # 首字节后 5 秒提速窗口
+RAMPUP_MIN_BYTES = 512 * 1024      # 5 秒内至少下到 512KB（≈100KB/s），否则判"未提速"
+ETA_CAP_FLOOR = 120                  # 体量预期判定保底预算（秒）；实际上限 = max(此值, 文件字节数/0.5MBps)
+                                      # 即要求单节点至少 ~0.5MB/s，否则判"速率对文件体量预期不符"
+THROTTLE_HITS = 3                   # 连续 N 个节点"未提速/预期不符" -> 池级限速，跳过自愈直奔特殊手段
+SPECIAL_FLOOR_MBPS = 0.05           # 特殊手段通道达标线：慢但活即可（gitproxy 实测 ~53KB/s 仍可贵）
 
 # ---------------------------------------------------------------- 内置种子池
 # mode: prefix=前置改写(全能力) hostmap=克隆换域 rawhost=raw换域 jsdelivr=CDN仅raw
@@ -635,9 +642,10 @@ def stream_to_file(url, path, floor_mbps, resume=0, expect=None):
         append = resume and r.status == 206
         if resume and r.status == 200:      # 镜像不支持 Range：从头下
             resume = 0
+        t_open = time.time()                # 响应打开即起表：提速窗口不含等首块的时间
         with r, open(path, "ab" if append else "wb") as f:
             while True:
-                chunk = r.read(256 * 1024)
+                chunk = r.read(64 * 1024)   # 64KB 粒度：限速判定不必等满大块
                 if not chunk:
                     break
                 f.write(chunk)
@@ -645,9 +653,21 @@ def stream_to_file(url, path, floor_mbps, resume=0, expect=None):
                 if ttfb is None:
                     ttfb = time.time()
                 if n >= PROBE_WINDOW_BYTES:
-                    mbs = round(n / (time.time() - ttfb) / 1e6, 2)
+                    mbs = round(n / (time.time() - t_open) / 1e6, 2)
                     if mbs < floor_mbps:
                         return "slow", mbs, resume + n, f"速率 {mbs} < 达标线 {floor_mbps} MB/s"
+                else:
+                    el0 = time.time() - t_open
+                    if el0 >= RAMPUP_SEC and n < RAMPUP_MIN_BYTES:
+                        return "slow", round(n / el0 / 1e6, 2), resume + n, \
+                            f"{RAMPUP_SEC}s 未提速（{n // 1024}KB@{el0:.0f}s）"
+                    if expect is not None and el0 > 2 and n >= 65536:
+                        speed = n / el0
+                        eta_cap = max(ETA_CAP_FLOOR, int(expect / 5e5))
+                        if speed < floor_mbps * 1e6 and (expect - resume - n) / speed > eta_cap:
+                            return "slow", round(speed / 1e6, 2), resume + n, (
+                                f"速率对文件体量预期不符（{n // 1024}KB@{el0:.0f}s，"
+                                f"预计超 {eta_cap}s 预算）")
         if n == 0 and not resume:
             return "fail", None, resume, "空响应"
         total = resume + n
@@ -829,12 +849,14 @@ def _clear_part(path):
 
 def sequential_download(st, target, out, expect=None):
     """顺序模式：候选按延迟低->高逐节点尝试。失效 -> 下一个；正常但速率不达标 -> 下一个；
-    连续 HEAL_FAILS 个失效 / 不达标触发自愈（collect+test 后重排序从头再试）"""
+    连续 HEAL_FAILS 个失效 / 不达标触发自愈（collect+test 后重排序从头再试）。
+    连续 THROTTLE_HITS 个节点 5 秒未提速/体量预期不符 -> 判池级大流量限速，
+    跳过自愈（小文件探针会骗过 collect+test）返回 2，由调用方走特殊手段链。"""
     floor = speed_floor(st)
-    print(f"顺序模式：达标线 {floor} MB/s（本流满 {PROBE_WINDOW_BYTES // 1048576}MB 判速）")
+    print(f"顺序模式：达标线 {floor} MB/s（满 {PROBE_WINDOW_BYTES // 1048576}MB 或 {RAMPUP_SEC}s 未提速判速）")
     path = out + ".part"
     resume = _resume_state(path, target)
-    fails = slows = heals = 0
+    fails = slows = heals = throttle_hits = 0
     while True:
         cands = download_candidates(st)
         if not cands:
@@ -859,8 +881,15 @@ def sequential_download(st, target, out, expect=None):
                 print(f"{tag} 完成：{out} {total / 1048576:.1f} MB，均速 {mbs} MB/s")
                 return 0
             if state == "slow":
+                if "未提速" in err or "预期不符" in err:
+                    throttle_hits += 1
                 slows, fails = slows + 1, 0
-                print(f"{tag} 速率不达标（{err}）-> 切下一个（连续不达标 {slows}/{HEAL_FAILS}）")
+                print(f"{tag} 速率不达标（{err}）-> 切下一个（连续不达标 {slows}/{HEAL_FAILS}，"
+                      f"限速命中 {throttle_hits}/{THROTTLE_HITS}）")
+                if throttle_hits >= THROTTLE_HITS:
+                    print(f"连续 {THROTTLE_HITS} 个节点提速失败 -> 判定池级大流量限速"
+                          f"（此状态下小文件探针全绿、自愈无意义，保留进度直奔特殊手段）")
+                    return 2
                 if slows >= HEAL_FAILS:
                     broke = True
                     break
@@ -882,6 +911,65 @@ def sequential_download(st, target, out, expect=None):
         heals += 1
 
 
+def _sm_gh_api_archive(target, out, expect):
+    """特殊手段 a：gh api tarball/zipball 直连——api.github.com 小报文通道独立于网页/git 通道，
+    池级限速夜实测常绿。仅覆盖 archive 链接；release 资产走 b 兜底。"""
+    m = re.match(r"^https://github\.com/([^/]+)/([^/?]+)/archive/refs/(heads|tags)/"
+                 r"([^/#?]+)\.(zip|tar\.gz)$", target)
+    if not m:
+        return False, "非 archive 链接（gh api 通道不适用）"
+    if not shutil.which("gh"):
+        return False, "gh CLI 不可用"
+    owner, repo, _kind, ref, ext = m.groups()
+    kind = "zipball" if ext == "zip" else "tarball"
+    tmp = out + ".sma"
+    cap = 300 if expect is None else max(120, int(expect / (0.3 * 1e6)) + 60)
+    try:
+        with open(tmp, "wb") as f:
+            subprocess.run(["gh", "api", f"repos/{owner}/{repo}/{kind}/{ref}"],
+                           stdout=f, stderr=subprocess.DEVNULL, timeout=cap, check=True)
+    except Exception as e:
+        if os.path.exists(tmp):
+            os.remove(tmp)
+        return False, f"gh api 失败/超时（{str(e)[:48]}）"
+    got = os.path.getsize(tmp)
+    if expect is not None and got != expect:
+        os.remove(tmp)
+        return False, f"大小不符 {got} != {expect}"
+    os.replace(tmp, out)
+    return True, f"gh api 直连 {got / 1048576:.1f} MB"
+
+
+def _sm_gitproxy(target, out, expect):
+    """特殊手段 b：api.gitproxy.dev 前缀直连——CF Workers 架构与池节点不同源，
+    池限速夜实测 ~53KB/s 慢而稳，支持 Range 续传（沿用 .part 进度）。"""
+    url = "https://api.gitproxy.dev/" + target[len("https://"):]
+    path = out + ".part"
+    resume = _resume_state(path, target)
+    state, mbs, total, err = stream_to_file(url, path, SPECIAL_FLOOR_MBPS, resume, expect)
+    if state == "done":
+        os.replace(path, out)
+        _clear_meta(path)
+        return True, f"gitproxy {total / 1048576:.1f} MB 均 {mbs} MB/s"
+    return False, f"gitproxy {state}（{err}）"
+
+
+def special_means_download(target, out, expect=None):
+    """特殊手段链：池级限速时的绕行通道，按实测可靠性排序。
+    全部失败时提示人工调研（技能坑5/坑6：code-search/contents API 小报文取证）。"""
+    print("== 特殊手段链：池级限速绕行 ==")
+    for name, fn in (("gh api 直连（api.github.com 独立通道）", _sm_gh_api_archive),
+                     ("api.gitproxy.dev（CF Workers 前缀，支持续传）", _sm_gitproxy)):
+        print(f"[特殊手段] {name} ...")
+        ok, msg = fn(target, out, expect)
+        print(f"[特殊手段] {'✅ ' if ok else '❌ '}{msg}")
+        if ok:
+            return 0
+    print("特殊手段全部失败 -> 人工介入：github-proxy 技能坑5/坑6"
+          "（code-search/contents API 小报文取证可替代整包下载；或后台 -C - 慢爬）")
+    return 1
+
+
 def cmd_download(st, target, out=None):
     if not re.match(r"^https://(github\.com|raw\.githubusercontent\.com|codeload\.github\.com)/", target):
         print("仅支持 github.com / raw.githubusercontent.com / codeload 的 URL")
@@ -894,7 +982,7 @@ def cmd_download(st, target, out=None):
         cands = download_candidates(st)
         if not cands:
             print("无可用节点")
-            return 1
+            return special_means_download(target, out)
     size = probe_size(cands, target)
     if size is None:
         print("文件大小：未知（直接顺序模式）")
@@ -908,7 +996,10 @@ def cmd_download(st, target, out=None):
             ok, _off = race_download(st, cands, target, out, size)
             if ok:
                 return 0
-    return sequential_download(st, target, out, size)
+    rc = sequential_download(st, target, out, size)
+    if rc == 2:                             # 池级限速：跳自愈直接特殊手段
+        rc = special_means_download(target, out, size)
+    return rc
 
 
 # ---------------------------------------------------------------- CLI
