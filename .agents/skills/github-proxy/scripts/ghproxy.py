@@ -940,8 +940,39 @@ def _sm_gh_api_archive(target, out, expect):
     return True, f"gh api 直连 {got / 1048576:.1f} MB"
 
 
+def _sm_overwall(target, out, expect):
+    """特殊手段 b：overwall 官方中继（dev-sidecar 公益 URL 嵌入式二层代理）。
+    GET https://ow-prod.docmirror.top/X2dvX292ZXJfd2FsbF8/<真实URL> + dspassword 头。
+    实测(2026-10-10)：raw 200@0.39s / google 204@0.65s；github.com 与 api 500 不吃。
+    红线：第三方公共中继=不可信，仅匿名流量，勿带凭据。"""
+    import urllib.request
+    if not target.startswith("https://raw.githubusercontent.com/"):
+        return False, "仅 raw 域适用"
+    url = "https://ow-prod.docmirror.top/X2dvX292ZXJfd2FsbF8/" + target[len("https://"):]
+    req = urllib.request.Request(url, headers={"dspassword": "dev_sidecar_is_666",
+                                               "User-Agent": "Mozilla/5.0"})
+    tmp = out + ".smc"
+    try:
+        with urllib.request.urlopen(req, timeout=90) as r, open(tmp, "wb") as f:
+            while True:
+                chunk = r.read(256 * 1024)
+                if not chunk:
+                    break
+                f.write(chunk)
+    except Exception as e:
+        if os.path.exists(tmp):
+            os.remove(tmp)
+        return False, f"overwall 失败（{str(e)[:48]}）"
+    got = os.path.getsize(tmp)
+    if expect is not None and got != expect:
+        os.remove(tmp)
+        return False, f"大小不符 {got} != {expect}"
+    os.replace(tmp, out)
+    return True, f"overwall 中继 {got / 1048576:.1f} MB"
+
+
 def _sm_gitproxy(target, out, expect):
-    """特殊手段 b：api.gitproxy.dev 前缀直连——CF Workers 架构与池节点不同源，
+    """特殊手段 c：api.gitproxy.dev 前缀直连——CF Workers 架构与池节点不同源，
     池限速夜实测 ~53KB/s 慢而稳，支持 Range 续传（沿用 .part 进度）。"""
     url = "https://api.gitproxy.dev/" + target[len("https://"):]
     path = out + ".part"
@@ -959,6 +990,7 @@ def special_means_download(target, out, expect=None):
     全部失败时提示人工调研（技能坑5/坑6：code-search/contents API 小报文取证）。"""
     print("== 特殊手段链：池级限速绕行 ==")
     for name, fn in (("gh api 直连（api.github.com 独立通道）", _sm_gh_api_archive),
+                     ("overwall 官方中继（raw 专用，免节点亚秒级）", _sm_overwall),
                      ("api.gitproxy.dev（CF Workers 前缀，支持续传）", _sm_gitproxy)):
         print(f"[特殊手段] {name} ...")
         ok, msg = fn(target, out, expect)

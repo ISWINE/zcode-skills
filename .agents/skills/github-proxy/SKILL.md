@@ -63,6 +63,14 @@ python ...ghproxy.py download https://github.com/u/r/releases/download/v1/x.exe 
 - 排名：clone 可用(+1000) > zip(+100) > raw(+10) > 吞吐；直连吞吐≥代理×2 时建议直连
 - apply 写 4 条全局 git 配置：github/raw/codeload 三主机 insteadOf + 镜像主机 per-host 空代理（绕过 dev-sidecar）；off 全清
 
+## 池外备选：proxypool 订阅网关（2026-10-10 建成，特殊手段链第 ③ 级）
+
+- 本机 sing-box 网关 `127.0.0.1:17236`（免费订阅节点池，urltest 自动选优，clash_api :9090 可观测）——github/google/受限站通用，深夜实测 google 204/github 200/clone 全通
+- 用法：`curl -x http://127.0.0.1:17236 <url>`；git clone 用 `GIT_CONFIG_GLOBAL=/dev/null git -c http.proxy=http://127.0.0.1:17236 clone <repo>`（进程级，不碰全局）
+- 启动：`cd D:\projects\proxypool && python pp.py sub && D:\tools\singbox\sing-box.exe run -c state\singbox.json`；配方速查 `python pp.py gw`
+- **红线：凭据/push 不过网关**（免费节点不可信），只走匿名流量；push 仍走原通道（dev-sidecar）
+- 项目本体：`D:\projects\proxypool`（ISWINE/proxypool 私有仓库）
+
 ## 手动备选镜像：gitproxy.dev（池外补充，2026-10-09 实测三通）
 
 - 前缀域名是 **`api.gitproxy.dev`**（注意：`https://gitproxy.dev/<url>` 只是 UI 转换页，直接当代理用会 307 转义成 `https%3A` → 404）
